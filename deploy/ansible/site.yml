@@ -1,0 +1,32 @@
+---
+- name: hawier stack
+  hosts: all
+  # Nothing here reads a gathered fact — every ansible_* in the role is a
+  # connection or inventory variable — and gathering them needs python on the
+  # target before any of our own checks can say so.
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+
+  pre_tasks:
+    # Someone will eventually run ansible-playbook by hand. Without the
+    # version the compose template would reference "hawier:-server" and the
+    # failure would surface as a missing image, three roles later.
+    - name: the version has to come from make
+      ansible.builtin.assert:
+        that:
+          - hawier_version is defined
+          - hawier_version is match('^v[0-9]{2}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{9}$')
+        fail_msg: >-
+          run this through `make deploy-{{ inventory_hostname }}`.
+          hawier_version must be the build stamp the images carry
+          (vYY.MM.DD-<9 hex>), not {{ hawier_version | default('(unset)') }}.
+        quiet: true
+
+  roles:
+    - preflight
+    # Tagged so `make rollback-<host>` can --skip-tags ship: the older image
+    # is already there, and nothing has to be rebuilt or sent.
+    - role: image
+      tags: [ship]
+    - stack

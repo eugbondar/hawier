@@ -1,0 +1,15 @@
+---
+# Everything that can refuse a host, asked before anything is built. A release
+# build is ten minutes; a host with no container engine is one ssh round trip,
+# and finding that out second is ten minutes of nobody's time.
+- name: can this host take a deploy at all
+  hosts: all
+  # Nothing here reads a gathered fact — every ansible_* in the role is a
+  # connection or inventory variable — and gathering them needs python on the
+  # target before any of our own checks can say so.
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+
+  roles:
+    - preflight

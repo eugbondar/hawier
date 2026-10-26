@@ -1,0 +1,43 @@
+---
+# After verification, never before: a failed deploy still has N-1 versions to
+# roll back to.
+
+# Ordered by the tag, not by a creation timestamp. The tag is vYY.MM.DD-<sha>,
+# so a lexical sort is a sort by build date — which is what "keep the last N"
+# means — and it needs no engine-specific template field and no assumption
+# about the host's timezone.
+#
+# Filtered with grep and not with `--filter reference=`: podman stores a
+# locally built image as localhost/<repo>, docker as <repo>, and the two
+# engines do not glob a registry prefix the same way. `(^|/)` matches either,
+# and the sort takes the tag field rather than the whole line, so a prefix
+# cannot outrank a newer build.
+# The `v` matters — without it the pattern would also take a
+# hawier:local-server left on a machine that deploys to itself.
+#
+# Every line stays at the same indentation: a more-indented line inside a `>-`
+# block keeps its newline instead of folding to a space, which turns the
+# pipeline into three broken commands.
+- name: hawier images beyond the last {{ hawier_keep_images }}
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      {{ hawier_engine }} images --format '{% raw %}{{.Repository}}:{{.Tag}}{% endraw %}'
+      | grep -E '(^|/){{ hawier_repo | basename }}:v[0-9]{2}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]+-{{ item }}$'
+      | sort -t: -k2 -r
+      | tail -n +{{ (hawier_keep_images | int) + 1 }}
+      | grep -v ':{{ hawier_version }}-{{ item }}$' || true
+    executable: /bin/bash
+  loop: [server, ui]
+  register: hawier_stale_images
+  changed_when: false
+
+- name: drop them
+  ansible.builtin.command:
+    argv: ["{{ hawier_engine }}", rmi, "{{ item }}"]
+  loop: "{{ hawier_stale_images.results | map(attribute='stdout_lines') | flatten }}"
+  register: hawier_rmi
+  # The engine refuses to remove an image a container references, and that
+  # refusal is the last line of defence against pruning the running version.
+  failed_when: false
+  changed_when: "'ntagged' in (hawier_rmi.stdout | default(''))"

@@ -1,0 +1,40 @@
+software =
+{
+	version = "@VERSION@";
+	description = "hawier reference device";
+
+	hawier-qemu = {
+		/* Exactly one revision, never a pattern: the hardened policy. */
+		hardware-compatibility: [ "@REVISION@" ];
+
+		stable = {
+			/* The device starts SWUpdate with -e stable,to-<inactive>. */
+			to-a = {
+				images: (
+					{
+						filename = "slot.squashfs";
+						device = "/dev/vda2";
+						type = "raw";
+						sha256 = "@SHA256@";
+					}
+				);
+				bootenv: (
+					{ name = "rootslot"; value = "a"; }
+				);
+			};
+			to-b = {
+				images: (
+					{
+						filename = "slot.squashfs";
+						device = "/dev/vda3";
+						type = "raw";
+						sha256 = "@SHA256@";
+					}
+				);
+				bootenv: (
+					{ name = "rootslot"; value = "b"; }
+				);
+			};
+		};
+	};
+}

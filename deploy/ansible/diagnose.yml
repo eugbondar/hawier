@@ -1,0 +1,26 @@
+---
+# What the stack on a host is doing, without deploying anything. `make
+# logs-<host>`.
+#
+# A play of its own and not a flag on site.yml: it must work when the stack is
+# broken, which is exactly when site.yml's checks would refuse to get this far —
+# and it takes no version, because it asks about what is running rather than
+# about what should be.
+- name: what hawier is doing on this host
+  hosts: all
+  # Nothing here reads a gathered fact — every ansible_* in the role is a
+  # connection or inventory variable — and gathering them needs python on the
+  # target before any of our own checks can say so.
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+
+  roles:
+    # For the engine, the compose command and nothing else.
+    - preflight
+
+  tasks:
+    - name: look
+      ansible.builtin.include_role:
+        name: stack
+        tasks_from: diagnose

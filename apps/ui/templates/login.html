@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Login</title>
+<link rel="stylesheet" href="/assets/main.css">
+</head>
+<body class="login-page">
+<section class="login-card">
+  <span class="brand large">Hawier</span>
+  <h1>Login</h1>
+  {%- match error %}
+  {%- when Some with (message) %}<div class="callout danger">{{ message }}</div>
+  {%- when None %}
+  {%- endmatch %}
+  <form method="post" action="/login">
+    <label>Username<input name="username" value="admin" required></label>
+    <label>Password<input name="password" type="password" value="admin" required></label>
+    <label>Tenant<input name="tenant" value="DEFAULT" required></label>
+    <button class="primary-button" type="submit">Login</button>
+  </form>
+</section>
+</body>
+</html>

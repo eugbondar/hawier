@@ -1,0 +1,107 @@
+# {{ ansible_managed }}
+#
+# TLS for the deployed stack. Caddy gets the certificates over ACME HTTP-01 and
+# renews them itself, which is the whole reason it is here rather than nginx
+# plus a separate client and a cron job.
+#
+# Two things the node needs from whatever sits in front of it, both easy to get
+# wrong and both silent when wrong:
+#
+#   * X-Forwarded-Proto. Every `_links` URL a device follows is built from it
+#     and the Host header (apps/server/src/ddi/mod.rs), so getting it wrong
+#     hands the whole fleet http:// links to download artifacts from.
+#   * X-Forwarded-For, OVERWRITTEN and not appended. The node reads the first
+#     hop as the device's address and has no trusted-proxy allowlist
+#     (apps/server/src/ddi/base.rs), so appending lets a device declare
+#     whatever address it likes.
+
+{
+{% if hawier_tls_email %}
+	email {{ hawier_tls_email }}
+{% endif %}
+	# The admin API stays on, listening on 127.0.0.1:2019 inside the
+	# container and published nowhere. `caddy reload` needs it, and that is
+	# what applies a changed Caddyfile without dropping a connection.
+}
+
+{% if hawier_ddi_host == hawier_console_host %}
+# One name, split by path: nothing to add to DNS, because this name already
+# resolves to this host — which is all ACME needs.
+#
+# `/{tenant}/controller/v1/...` is the DDI surface and the tenant segment is
+# dynamic, hence the regexp; `/rest/v1` is the Mgmt API. Everything else is the
+# console, whose own routes are single-segment (`/targets`, `/rollouts`) and
+# cannot collide with a path that has `controller/v1` inside it.
+{{ hawier_console_host }} {
+	@ddi path_regexp ^/[^/]+/controller/v1/
+	# /health is the node's, not the console's — the console's own is
+	# /api/health. With one name the fallback would otherwise hand /health to
+	# the console, which answers "Not found" and makes a working stack look
+	# broken.
+	@mgmt path /health /rest/v1 /rest/v1/*
+
+	handle @ddi {
+		reverse_proxy hawier-control:8080 {
+			# REPLACES the header rather than appending to it, which is the
+			# point: Caddy's default is to append {remote_host} to whatever
+			# the client sent, and the node reads the FIRST hop as the
+			# device's address with no trusted-proxy allowlist
+			# (apps/server/src/ddi/base.rs). Caddy warns that this is
+			# "unnecessary" — that warning is about passing headers through,
+			# not about overwriting one, so it is wrong here.
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	handle @mgmt {
+		reverse_proxy hawier-control:8080 {
+			# REPLACES the header rather than appending to it, which is the
+			# point: Caddy's default is to append {remote_host} to whatever
+			# the client sent, and the node reads the FIRST hop as the
+			# device's address with no trusted-proxy allowlist
+			# (apps/server/src/ddi/base.rs). Caddy warns that this is
+			# "unnecessary" — that warning is about passing headers through,
+			# not about overwriting one, so it is wrong here.
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	handle {
+		encode zstd gzip
+		reverse_proxy hawier-ui:8088 {
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# No `encode` on the DDI or Mgmt side: artifacts are already-compressed
+	# binaries streamed straight from storage, and gzipping them would burn
+	# the one core this host has for nothing.
+}
+{% else %}
+# A name of its own for the fleet: this is the name every device will walk,
+# because the node builds its `_links` from the Host it was given.
+{{ hawier_ddi_host }} {
+	reverse_proxy hawier-control:8080 {
+		# REPLACES the header rather than appending to it, which is the
+		# point: Caddy's default is to append {remote_host} to whatever
+		# the client sent, and the node reads the FIRST hop as the
+		# device's address with no trusted-proxy allowlist
+		# (apps/server/src/ddi/base.rs). Caddy warns that this is
+		# "unnecessary" — that warning is about passing headers through,
+		# not about overwriting one, so it is wrong here.
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
+
+{{ hawier_console_host }} {
+	encode zstd gzip
+	reverse_proxy hawier-ui:8088 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
+{% endif %}

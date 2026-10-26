@@ -1,0 +1,63 @@
+# hawier reference device (spec: reference-device-image).
+# Small on purpose: it is built on hosted CI runners, cold, within budget.
+
+BR2_x86_64=y
+BR2_x86_x86_64=y
+
+# Downloads and the compiler cache live next to the Buildroot tree in
+# target/e2e/, where CI caches them and build-cache GC never looks.
+BR2_DL_DIR="$(TOPDIR)/../dl"
+BR2_CCACHE=y
+BR2_CCACHE_DIR="$(TOPDIR)/../ccache"
+BR2_DOWNLOAD_FORCE_CHECK_HASHES=y
+# Extra hash files (see patches/linux/linux.hash for why the kernel needs one).
+BR2_GLOBAL_PATCH_DIR="$(BR2_EXTERNAL_HAWIER_PATH)/patches"
+BR2_OPTIMIZE_S=y
+
+# A prebuilt toolchain, pinned by this Buildroot release's own hash file:
+# building one is most of a cold build.
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y
+BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_X86_64_MUSL_STABLE=y
+
+BR2_TARGET_GENERIC_HOSTNAME="hawier-qemu"
+BR2_TARGET_GENERIC_ISSUE="hawier reference device (test image)"
+BR2_TARGET_GENERIC_GETTY_PORT="ttyS0"
+# The root stays read-only: writable state is tmpfs and the data partition.
+# BR2_TARGET_GENERIC_REMOUNT_ROOTFS_RW is not set
+BR2_SYSTEM_DHCP="eth0"
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_HAWIER_PATH)/board/hawier-qemu/rootfs-overlay"
+BR2_ROOTFS_POST_BUILD_SCRIPT="$(BR2_EXTERNAL_HAWIER_PATH)/board/hawier-qemu/post-build.sh"
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_HAWIER_PATH)/board/hawier-qemu/post-image.sh"
+
+# The kernel lives inside each slot (/boot/bzImage), so an update replaces
+# kernel and root filesystem together.
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_LATEST_VERSION=y
+BR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y
+BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE="$(BR2_EXTERNAL_HAWIER_PATH)/board/hawier-qemu/linux.config"
+BR2_LINUX_KERNEL_INSTALL_TARGET=y
+# objtool (x86_64, ORC unwinder) needs libelf on the host.
+BR2_LINUX_KERNEL_NEEDS_HOST_LIBELF=y
+
+BR2_PACKAGE_SWUPDATE=y
+BR2_PACKAGE_SWUPDATE_CONFIG="$(BR2_EXTERNAL_HAWIER_PATH)/board/hawier-qemu/swupdate.config"
+# BR2_PACKAGE_SWUPDATE_WEBSERVER is not set
+# BR2_PACKAGE_SWUPDATE_INSTALL_WEBSITE is not set
+BR2_PACKAGE_LIBCONFIG=y
+BR2_PACKAGE_LIBCURL=y
+# BR2_PACKAGE_LIBCURL_CURL is not set
+BR2_PACKAGE_OPENSSL=y
+
+BR2_TARGET_ROOTFS_SQUASHFS=y
+BR2_TARGET_ROOTFS_SQUASHFS4_XZ=y
+# BR2_TARGET_ROOTFS_TAR is not set
+
+BR2_TARGET_GRUB2=y
+BR2_TARGET_GRUB2_I386_PC=y
+BR2_TARGET_GRUB2_BOOT_PARTITION="hd0,msdos1"
+BR2_TARGET_GRUB2_BUILTIN_MODULES_PC="boot linux ext2 squash4 part_msdos normal biosdisk loadenv test echo"
+
+BR2_PACKAGE_HOST_GENIMAGE=y
+BR2_PACKAGE_HOST_E2FSPROGS=y
+BR2_PACKAGE_HOST_SQUASHFS=y

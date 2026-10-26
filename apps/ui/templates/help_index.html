@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% import "help_blocks.html" as b %}
+{% block content %}
+<section class="panel">
+  <div class="resource-toolbar" data-help="console/help#the-manual">
+    <strong>Help</strong>
+    <span class="toolbar-separator"></span>
+    <form class="doc-search" method="get" action="/help">
+      <input name="q" value="{{ q }}" placeholder="Search the manual" aria-label="Search the manual" autocomplete="off">
+      <button type="submit">Search</button>
+    </form>
+    {%- if q.len() > 0 %}<a class="ghost-button" href="/help">Clear</a>{% endif %}
+  </div>
+  <article class="doc doc-article">
+    {% call b::disclaimer() %}{% endcall %}
+    {%- if q.len() > 0 %}
+    {%- if hits.is_empty() %}
+    <div class="empty-cell">Nothing in the manual mentions that.</div>
+    {%- else %}
+    <p class="muted">{{ hits.len() }} section(s) mention that.</p>
+    <dl class="doc-defs doc-hits">
+      {%- for hit in hits %}
+      <dt><a href="{{ hit.href }}">{{ hit.title }}</a> <span class="muted">{{ hit.topic_title }}</span></dt><dd>{{ hit.summary }}</dd>
+      {%- endfor %}
+    </dl>
+    {%- endif %}
+    {%- else %}
+    <p>Every screen, field, column and status word in this console is documented here. To ask about one specific control instead of reading a chapter, press the question mark in the top bar (or <strong>Shift+F1</strong>) and click the control.</p>
+    {%- for area in areas %}
+    <h2 id="{{ area.anchor }}"><a class="doc-anchor" href="#{{ area.anchor }}">{{ area.label }}</a></h2>
+    <dl class="doc-defs">
+      {%- for topic in area.topics %}
+      <dt><a href="{{ topic.href }}">{{ topic.title }}</a></dt><dd>{{ topic.summary }}</dd>
+      {%- endfor %}
+    </dl>
+    {%- endfor %}
+    {%- endif %}
+  </article>
+</section>
+{% endblock %}

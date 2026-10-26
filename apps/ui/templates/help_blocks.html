@@ -1,0 +1,44 @@
+{#- The manual's typed blocks become markup here, and only here. -#}
+
+{% macro spans(items) %}
+{%- for span in items.iter() -%}
+{%- match span -%}
+{%- when Span::Text with (text) -%}{{ text }}
+{%- when Span::Code with (text) -%}<code>{{ text }}</code>
+{%- when Span::Strong with (text) -%}<strong>{{ text }}</strong>
+{#- The same badge the lists draw, so the word is recognised before it is read. -#}
+{%- when Span::Status { href, word, class } -%}<a class="status-badge {{ class }}" href="{{ href }}">{{ word }}</a>
+{%- when Span::Link { href, label, doc_key } -%}<a href="{{ href }}">{{ label }}</a>
+{%- endmatch -%}
+{%- endfor -%}
+{% endmacro %}
+
+{#- The reader is entitled to know who wrote what they are about to trust,
+    and entitled not to be told twice. Folded, and deliberately without a
+    `data-tree-key`: it opens on request and never remembers being opened. -#}
+{% macro disclaimer() %}
+<details class="doc-disclaimer">
+  <summary>Written by an AI</summary>
+  <p>This manual was generated from the source of this build. Tests check that it covers every field, column, view and status word, and that its links resolve — the wording itself is not reviewed line by line.</p>
+</details>
+{% endmacro %}
+
+{% macro blocks(items) %}
+{%- for block in items.iter() %}
+{%- match block %}
+{%- when Block::Para with (spans) %}
+<p>{% call spans(spans) %}{% endcall %}</p>
+{%- when Block::Note with (spans) %}
+{#- Never the danger callout: the audit reads that class as a broken page. -#}
+<div class="callout note">{% call spans(spans) %}{% endcall %}</div>
+{%- when Block::Bullets with (rows) %}
+<ul>{% for row in rows.iter() %}<li>{% call spans(row) %}{% endcall %}</li>{% endfor %}</ul>
+{%- when Block::Steps with (rows) %}
+<ol>{% for row in rows.iter() %}<li>{% call spans(row) %}{% endcall %}</li>{% endfor %}</ol>
+{%- when Block::Defs with (rows) %}
+<dl class="doc-defs">{% for row in rows.iter() %}<dt>{% call spans(row.term) %}{% endcall %}</dt><dd>{% call spans(row.text) %}{% endcall %}</dd>{% endfor %}</dl>
+{%- when Block::Code with (text) %}
+<pre class="doc-code"><code>{{ text }}</code></pre>
+{%- endmatch %}
+{%- endfor %}
+{% endmacro %}

@@ -1,0 +1,194 @@
+services:
+  # Fully qualified: podman with short-name-mode = enforcing cannot resolve a
+  # bare `postgres:16-alpine` without a TTY, and docker normalises this to the
+  # same image anyway.
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    environment:
+      POSTGRES_DB: hawkbit
+      POSTGRES_USER: hawkbit
+      POSTGRES_PASSWORD: hawkbit
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hawkbit -d hawkbit"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  # hawier control node: full Mgmt + DDI + background engines
+  # (rollouts, auto-assign). One control node per deployment.
+  hawier-control:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: server
+      args:
+        GIT_SHA: ${GIT_SHA:-}
+        BUILD_DATE: ${BUILD_DATE:-}
+        CARGO_PROFILE: ${CARGO_PROFILE:-dev}
+    image: hawier:local-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HAWIER_ROLE: control
+      HAWIER_NODE_ID: "1"
+      HAWIER_BIND_ADDR: 0.0.0.0:8080
+      HAWIER_DATABASE_URL: postgres://hawkbit:hawkbit@postgres:5432/hawkbit
+      HAWIER_ARTIFACT_DIR: /artifacts
+      # Storage and event delivery are wasm extensions (EXTENSIONS.md).
+      # Without the first, artifacts answer 503 — there is no built-in store.
+      HAWIER_EXT_STORAGE: /usr/local/lib/hawier/hawier_ext_fs.wasm
+      HAWIER_EXT_EVENT_SINK: /usr/local/lib/hawier/hawier_ext_webhook.wasm
+      HAWIER_EXT_RETENTION: /usr/local/lib/hawier/hawier_ext_retention.wasm
+      # The classic percentage rollout is a module like any other; a
+      # hardened node simply points this elsewhere, or nowhere.
+      HAWIER_EXT_ROLLOUT: /usr/local/lib/hawier/hawier_ext_rollout_classic.wasm
+      HAWIER_EXT_CONSOLE: /usr/local/lib/hawier/hawier_ext_console.wasm
+      # Enforcement is opt-in per tenant: with no roles defined this
+      # changes nothing (see EXTENSIONS.md §4.4).
+      HAWIER_EXT_AUTHZ: /usr/local/lib/hawier/hawier_ext_authz.wasm
+      # Only HAWIER_EXT_* reaches a module; it cannot read the node's secrets.
+      #
+      # Set here rather than in the parameters file on purpose: it has to
+      # match the artifact volume mount below, which is a deployment fact and
+      # not an operator preference. The environment beats the file, so the
+      # console shows this row as pinned and offers no edit for it — which
+      # makes this the live demonstration of that rule.
+      HAWIER_EXT_FS_ROOT: /artifacts
+      # Everything else a module reads lives here and is editable from the
+      # console's System Settings. Applied when the node restarts: a module
+      # reads its environment when it is instantiated.
+      HAWIER_EXT_PARAMS_FILE: /etc/hawier/extensions.env
+      HAWIER_MGMT_USERS: admin:admin:DEFAULT
+      HAWIER_INTERNAL_TOKEN: change-me-in-production
+      RUST_LOG: hawier_server=info,tower_http=info
+      # the docker client may inject host proxy env; internal traffic must not use it
+      http_proxy: ""
+      https_proxy: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+    ports:
+      - "8080:8080"
+    volumes:
+      - artifacts:/artifacts
+      # Writable: this is the node the console configures.
+      - ext-config:/etc/hawier
+    # Docker's default soft limit is 1024 descriptors. A node serving
+    # artifacts needs one socket plus one open file per download, so a
+    # thousand devices exhaust it — and the node then answers 500 ("No file
+    # descriptors available") to EVERYTHING, polls included, which the fleet
+    # reads as a failed cycle and retries. One benchmark run logged 154k of
+    # those. The hard limit here is already 524288.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    restart: unless-stopped
+
+  # hawier sub node: DDI + artifact download + read-only Mgmt. Devices keep
+  # updating through sub nodes when the control node is down.
+  # Enable with: docker compose --profile scale up -d
+  hawier-sub:
+    profiles: ["scale"]
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: server
+      args:
+        GIT_SHA: ${GIT_SHA:-}
+        BUILD_DATE: ${BUILD_DATE:-}
+        CARGO_PROFILE: ${CARGO_PROFILE:-dev}
+    image: hawier:local-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HAWIER_ROLE: sub
+      HAWIER_NODE_ID: "2"
+      HAWIER_BIND_ADDR: 0.0.0.0:8080
+      HAWIER_DATABASE_URL: postgres://hawkbit:hawkbit@postgres:5432/hawkbit
+      HAWIER_ARTIFACT_DIR: /artifacts
+      # Storage and event delivery are wasm extensions (EXTENSIONS.md).
+      # Without the first, artifacts answer 503 — there is no built-in store.
+      HAWIER_EXT_STORAGE: /usr/local/lib/hawier/hawier_ext_fs.wasm
+      HAWIER_EXT_EVENT_SINK: /usr/local/lib/hawier/hawier_ext_webhook.wasm
+      HAWIER_EXT_RETENTION: /usr/local/lib/hawier/hawier_ext_retention.wasm
+      # The classic percentage rollout is a module like any other; a
+      # hardened node simply points this elsewhere, or nowhere.
+      HAWIER_EXT_ROLLOUT: /usr/local/lib/hawier/hawier_ext_rollout_classic.wasm
+      HAWIER_EXT_CONSOLE: /usr/local/lib/hawier/hawier_ext_console.wasm
+      # Enforcement is opt-in per tenant: with no roles defined this
+      # changes nothing (see EXTENSIONS.md §4.4).
+      HAWIER_EXT_AUTHZ: /usr/local/lib/hawier/hawier_ext_authz.wasm
+      # Only HAWIER_EXT_* reaches a module; it cannot read the node's secrets.
+      #
+      # Set here rather than in the parameters file on purpose: it has to
+      # match the artifact volume mount below, which is a deployment fact and
+      # not an operator preference. The environment beats the file, so the
+      # console shows this row as pinned and offers no edit for it — which
+      # makes this the live demonstration of that rule.
+      HAWIER_EXT_FS_ROOT: /artifacts
+      # Everything else a module reads lives here and is editable from the
+      # console's System Settings. Applied when the node restarts: a module
+      # reads its environment when it is instantiated.
+      HAWIER_EXT_PARAMS_FILE: /etc/hawier/extensions.env
+      HAWIER_MGMT_USERS: admin:admin:DEFAULT
+      HAWIER_INTERNAL_TOKEN: change-me-in-production
+      RUST_LOG: hawier_server=info,tower_http=info
+      # the docker client may inject host proxy env; internal traffic must not use it
+      http_proxy: ""
+      https_proxy: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+    ports:
+      - "8081:8080"
+    volumes:
+      - artifacts:/artifacts
+      # Read-only here. The storage module needs these parameters on every
+      # node, but they are set on the control node — this makes that true
+      # mechanically rather than by convention.
+      - ext-config:/etc/hawier:ro
+    # Same as control, and it matters more here: the sub node is the one the
+    # fleet downloads from.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    restart: unless-stopped
+
+  hawier-ui:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: ui
+      args:
+        GIT_SHA: ${GIT_SHA:-}
+        BUILD_DATE: ${BUILD_DATE:-}
+        CARGO_PROFILE: ${CARGO_PROFILE:-dev}
+    image: hawier:local-ui
+    depends_on:
+      - hawier-control
+    environment:
+      HAWKBIT_MGMT_URL: http://hawier-control:8080
+      HAWIER_API_URL: http://hawier-control:8080
+      HAWIER_INTERNAL_TOKEN: change-me-in-production
+      HAWIER_BIND_ADDR: 0.0.0.0:8088
+      HAWIER_STATIC_DIR: /app/static
+      RUST_LOG: hawier_ui=info,tower_http=info
+      http_proxy: ""
+      https_proxy: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+    ports:
+      - "8088:8088"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  artifacts:
+  # Extension parameters. Writable only by the control node.
+  ext-config:

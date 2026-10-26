@@ -1,0 +1,11 @@
+{#- Typeahead results for [data-picker]: value + label, nothing else. -#}
+{%- if rows.is_empty() -%}
+<span class="picker-state">No matches</span>
+{%- else -%}
+{%- for row in rows -%}
+<button type="button" class="picker-option" data-value="{{ row.value }}" data-label="{{ row.label }}">{{ row.label }}</button>
+{%- endfor -%}
+{%- if truncated -%}
+<span class="picker-state">Keep typing to narrow further</span>
+{%- endif -%}
+{%- endif -%}

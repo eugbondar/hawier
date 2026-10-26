@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="section-title" data-help="start/console#the-overview">Targets by status</div>
+  <div class="stat-grid">
+    {%- for card in status_cards %}
+    <a class="stat-card" href="{{ card.href }}" data-help="start/console#counts-that-add-up"><span class="stat-value">{{ card.count }}</span><span class="stat-label">{{ card.label }}</span></a>
+    {%- endfor %}
+  </div>
+</section>
+<section class="panel">
+  <div class="section-title" data-help="start/console#the-overview">Overview</div>
+  <table class="property-table"><tbody>
+    {%- for row in counts %}
+    <tr>
+      <th><a href="/{{ row.id }}">{{ row.label }}</a></th>
+      <td>{{ row.count }}</td>
+      <td>{{ row.group }}</td>
+      <td>
+        {%- match row.new_href %}
+        {%- when Some with (href) %}<a href="{{ href }}">New</a>
+        {%- when None %}<span class="muted">New hidden until verified</span>
+        {%- endmatch %}
+      </td>
+    </tr>
+    {%- endfor %}
+  </tbody></table>
+</section>
+<div class="dashboard-grid">
+  <section class="panel">
+    <div class="section-title" data-help="deployment/rollouts#rollouts">Active rollouts</div>
+    <table class="data-table"><tbody>
+      {%- if rollouts.is_empty() %}
+      <tr><td class="muted">No active rollouts.</td></tr>
+      {%- else %}
+      {%- for rollout in rollouts %}
+      <tr><td><a href="{{ rollout.href }}">{{ rollout.name }}</a></td><td><span class="status-pill {{ crate::view::status_class(rollout.status.as_str()) }}" data-help="glossary#{{ rollout.status }}">{{ rollout.status }}</span></td><td>{{ rollout.finished }}/{{ rollout.total }}</td></tr>
+      {%- endfor %}
+      {%- endif %}
+    </tbody></table>
+  </section>
+  <section class="panel">
+    <div class="section-title" data-help="admin/incidents#incidents">Incidents</div>
+    <table class="data-table"><tbody>
+      {%- if incidents.is_empty() %}
+      <tr><td class="muted">No incidents from devices or API clients.</td></tr>
+      {%- else %}
+      {%- for incident in incidents %}
+      <tr><td><a href="/incidents/{{ incident.number }}"><code>{{ incident.number }}</code></a></td><td><span class="status-pill error" data-help="admin/incidents#incidents">{{ incident.status }}</span></td><td>{{ incident.route }}</td><td>{{ incident.message }}</td></tr>
+      {%- endfor %}
+      {%- endif %}
+    </tbody></table>
+    {%- if console_noise > 0 %}
+    <a class="muted console-noise" href="/incidents?view=console">+{{ console_noise }} console-side incident(s)</a>
+    {%- endif %}
+    <a class="ghost-button" href="/incidents">All incidents</a>
+  </section>
+</div>
+{% endblock %}

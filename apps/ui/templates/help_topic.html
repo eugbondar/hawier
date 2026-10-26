@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% import "help_blocks.html" as b %}
+{% block content %}
+{#- One panel, one document. A chapter is not a stack of cards: headings
+    separate its sections, not borders. -#}
+<section class="panel">
+  <div class="resource-toolbar" data-help="console/help#the-manual">
+    <strong>{{ title }}</strong>
+    <span class="toolbar-separator"></span>
+    <a class="ghost-button" href="/help">All topics</a>
+  </div>
+  <article class="doc doc-article">
+    {% call b::disclaimer() %}{% endcall %}
+    {% call b::blocks(intro) %}{% endcall %}
+    {%- if sections.len() > 6 %}
+    <nav class="doc-toc" data-help="console/help#the-manual">
+      <span class="doc-toc-label">On this page</span>
+      {%- for section in sections %}<a href="#{{ section.anchor }}">{{ section.title }}</a>{% endfor %}
+    </nav>
+    {%- endif %}
+    {%- for section in sections %}
+    <h2 id="{{ section.anchor }}" data-help="{{ topic_id }}#{{ section.anchor }}">
+      {%- match section.status -%}
+      {%- when Some with (state) -%}
+      <a class="status-badge {{ state.class }}" href="#{{ section.anchor }}">{{ state.word }}</a>
+      {%- when None -%}
+      <a class="doc-anchor" href="#{{ section.anchor }}">{{ section.title }}</a>
+      {%- endmatch -%}
+    </h2>
+    {% call b::blocks(section.body) %}{% endcall %}
+    {%- endfor %}
+  </article>
+</section>
+{% endblock %}

@@ -1,0 +1,36 @@
+---
+# One plain-text report, written to a file on the machine that ran make. Not a
+# screen of ansible debug blocks with escaped tabs in them: there has to be one
+# thing to read, and one thing to paste.
+
+- name: the report script
+  ansible.builtin.template:
+    src: report.sh.j2
+    dest: "{{ hawier_dir }}/report.sh"
+    owner: "{{ hawier_owner }}"
+    group: "{{ hawier_group }}"
+    mode: "0750"
+  changed_when: false
+
+- name: ask the host what it is doing
+  ansible.builtin.command:
+    argv: ["{{ hawier_dir }}/report.sh"]
+  register: hawier_report
+  changed_when: false
+  failed_when: false
+
+- name: write it down here
+  ansible.builtin.copy:
+    content: "{{ hawier_report.stdout }}\n"
+    dest: "{{ hawier_report_path }}"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: the report
+  ansible.builtin.debug:
+    msg:
+      - "{{ hawier_report_path }} — the whole state of {{ inventory_hostname }}, as text"
+      - "make logs-{{ inventory_hostname }}                 prints it"
+      - "make logs-{{ inventory_hostname }} DIAG_LINES=300  more of each log"

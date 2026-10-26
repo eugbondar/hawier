@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="callout{% if danger %} danger{% endif %}">{{ message }}</div>
+</section>
+{% endblock %}

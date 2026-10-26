@@ -1,0 +1,51 @@
+#!/bin/sh
+# {{ ansible_managed }}
+#
+# One look at the node, for the play's wait loop. Prints exactly one word and
+# exits 0:
+#
+#   ready: <status>     it answers /health
+#   looping: <why>      it is restarting, and waiting longer will not help
+#   waiting: <status>   not yet, ask again
+#
+# A script and not a shell line inside the task, for two reasons: a `>-` block
+# in YAML keeps the newline of any line indented deeper than its first, which
+# has already turned one pipeline here into three broken commands; and this can
+# be run by hand on the host, which is where anyone debugging it will be.
+set -u
+
+ENGINE='{{ hawier_engine }}'
+CID='{{ hawier_node_cid.stdout | trim }}'
+# The restart count as it was when the wait began. Anything above it means the
+# container has died since — which is the signal that survives the race below.
+BASE={{ hawier_node_restarts_before | default(0) }}
+
+status=$("$ENGINE" ps -a --filter "id=$CID" --format '{% raw %}{{.Status}}{% endraw %}' 2>/dev/null | head -1)
+[ -n "$status" ] || status='(gone)'
+
+case "$status" in
+  Restarting*|Exited*|Dead*) echo "looping: $status"; exit 0 ;;
+  '(gone)')                  echo "looping: the container is no longer there"; exit 0 ;;
+esac
+
+# A container restarting once a second is "Up 0 seconds" about as often as it is
+# "Restarting", so the status alone races. The count does not: it only ever goes
+# up, and comparing against where it started means a container that restarted
+# legitimately some time before this deploy is not mistaken for a loop.
+restarts=$("$ENGINE" inspect --format '{% raw %}{{.RestartCount}}{% endraw %}' "$CID" 2>/dev/null || echo "$BASE")
+case "$restarts" in
+  ''|*[!0-9]*) restarts=$BASE ;;
+esac
+if [ "$restarts" -gt "$BASE" ]; then
+  echo "looping: restarted $restarts time(s) since this deploy began, now $status"
+  exit 0
+fi
+
+# Through the engine and into the container, so the host needs no HTTP client:
+# busybox wget is already in the image, the healthcheck uses it. Bounded,
+# because an exec against a container that dies underneath it does not return.
+if timeout 5 "$ENGINE" exec "$CID" wget -qO- http://127.0.0.1:8080/health 2>/dev/null | grep -q ok; then
+  echo "ready: $status"
+else
+  echo "waiting: $status"
+fi

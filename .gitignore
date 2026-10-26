@@ -1,0 +1,8 @@
+/target
+artifacts/
+*.log
+
+# Deploy logs (make deploy-*/logs-*): hawier-<host>.log and the ansible chatter.
+*.log.ansible
+# Private hosts, read by make next to deploy/ansible/inventory.yml.
+deploy/ansible/inventory.local.yml

@@ -1,0 +1,30 @@
+#!/bin/sh
+#
+# SWUpdate in suricatta mode against hawier. Replaces the package's script:
+# that one starts the web server and reads a static configuration, and this
+# device has neither. Runs only when S05hawier-identity rendered a
+# configuration.
+
+start() {
+	if [ ! -r /run/swupdate.cfg ]; then
+		echo "hawier: no device configuration, SWUpdate not started" > /dev/console
+		return 0
+	fi
+	# Its output goes to the serial console: that log is what the harness
+	# keeps when a scenario fails, and a refusal must be readable there.
+	/usr/bin/swupdate -f /run/swupdate.cfg -u "" > /dev/console 2>&1 &
+	echo $! > /run/swupdate.pid
+	echo "hawier: swupdate started" > /dev/console
+}
+
+stop() {
+	[ -r /run/swupdate.pid ] && kill "$(cat /run/swupdate.pid)" 2>/dev/null
+	rm -f /run/swupdate.pid
+}
+
+case "$1" in
+	start) start ;;
+	stop) stop ;;
+	restart) stop; start ;;
+	*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

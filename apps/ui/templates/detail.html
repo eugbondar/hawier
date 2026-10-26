@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% import "panels.html" as p %}
+{% block content %}
+<section class="panel"{% if autorefresh %} data-autorefresh="5"{% endif %}>
+  <div class="resource-toolbar">
+    <strong data-help="{{ layout.help }}">{{ label }}: {{ id }}</strong>
+    {%- match edit_href %}
+    {%- when Some with (href) %}<a class="primary-button" href="{{ href }}" data-help="console/lists#editing">Edit</a>
+    {%- when None %}
+    {%- endmatch %}
+    <form method="post" action="{{ delete_action }}" data-confirm="Delete {{ id }}?" data-help="bulk#delete"><button class="danger-button" type="submit">Delete</button></form>
+    {%- for action in state_actions %}
+    <form method="post" action="{{ action.action }}" data-confirm="{{ action.confirm }}" data-help="{{ action.help }}"><button type="submit">{{ action.label }}</button></form>
+    {%- endfor %}
+    <span class="toolbar-separator"></span>
+    <label class="raw-switch" data-help="console/lists#raw" title="Show the values exactly as the API returns them — paste them into FIQL"><input type="checkbox" data-raw-toggle> raw</label>
+  </div>
+  <table class="property-table"><tbody>
+    {%- for field in fields %}
+    {#- Two renderings per row: the human one, and the value exactly as the
+        API sent it (that raw text is what a FIQL filter takes). -#}
+    <tr><th data-help="{{ field.help }}">{{ field.key }}</th><td><span class="cooked">{% call m::cell(field.cell) %}{% endcall %}</span><span class="raw"><code>{{ field.raw }}</code></span></td></tr>
+    {%- endfor %}
+  </tbody></table>
+</section>
+{%- match extra %}
+{%- when DetailExtra::Rollout with (panel) %}{% call p::rollout(panel) %}{% endcall %}
+{%- when DetailExtra::SoftwareModule with (panel) %}{% call p::software_module(panel) %}{% endcall %}
+{%- when DetailExtra::DistributionSet with (panel) %}{% call p::distribution_set(panel) %}{% endcall %}
+{%- when DetailExtra::Target with (panel) %}{% call p::target(panel) %}{% endcall %}
+{%- when DetailExtra::Incident with (panel) %}{% call p::incident(panel) %}{% endcall %}
+{%- when DetailExtra::DsType with (panel) %}{% call p::ds_type(panel) %}{% endcall %}
+{%- when DetailExtra::TargetType with (panel) %}{% call p::target_type(panel) %}{% endcall %}
+{%- when DetailExtra::TargetFilter with (panel) %}{% call p::auto_assign(panel) %}{% endcall %}
+{%- when DetailExtra::None %}
+{%- endmatch %}
+{% endblock %}

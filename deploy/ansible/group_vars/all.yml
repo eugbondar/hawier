@@ -1,0 +1,148 @@
+---
+# Defaults for every host in inventory.yml. Override per host there.
+
+# Where the stack lives on the target.
+hawier_dir: /opt/hawier
+# Compose project name. Pinned rather than derived from the directory,
+# because the volumes are <project>_postgres-data and <project>_ext-config:
+# if the project name ever changes, the next `up -d` silently creates empty
+# ones — an empty database, and no error anywhere.
+hawier_project: hawier
+
+# `localhost/` on purpose, and it is not cosmetic. A load renames what it
+# reads: podman qualifies an unqualified name with `localhost/`, and docker
+# normalises `docker.io/library/x` down to `x` before saving, so a name chosen
+# on one engine is not the name the other ends up with — and the deployed
+# compose file then asks for an image the host does not have under that name.
+# A name that already looks registry-qualified is passed through verbatim by
+# both, in both directions. The ids cannot be used for this: docker and podman
+# compute different ids for the same image, so tagging by id answers "image not
+# known" and comparing by id reships everything on every deploy.
+hawier_repo: localhost/hawier
+# Fully qualified on purpose: podman with short-name-mode = enforcing cannot
+# resolve a bare name without a TTY to ask on, and a play has none. Pin a
+# digest here (…@sha256:…) to keep two hosts deployed a month apart on the
+# same minor version of Postgres.
+hawier_postgres_image: localhost/postgres:16-alpine
+# Where that image is fetched from, on the machine running make — the only one
+# allowed to fetch. Fully qualified because podman with short-name-mode =
+# enforcing cannot resolve a bare name without a TTY, and a play has none.
+hawier_postgres_source: docker.io/library/postgres:16-alpine
+
+# --- TLS ------------------------------------------------------------------
+# Off by default: the stand has no names and wants none. Turning it on puts
+# Caddy in front, which gets the certificates itself over ACME HTTP-01 and
+# renews them, and moves the node and the console off every public interface
+# onto loopback — the proxy reaches them over the compose network.
+#
+# Two names rather than one path-split host: `_links` are built from the Host
+# header the device used (apps/server/src/ddi/mod.rs), so the fleet should be
+# given a name of its own, and the Caddyfile then needs no regexp over a
+# dynamic tenant segment.
+hawier_tls: false
+hawier_console_host: ""
+hawier_ddi_host: ""
+# ACME contact. Empty is allowed — Let's Encrypt no longer requires one — but
+# then nothing warns you before an expiry you missed.
+hawier_tls_email: ""
+# Refuse a name that does not point here, rather than letting Caddy retry ACME
+# against it forever. Set false on a host behind NAT, where its public address
+# is not on any of its interfaces.
+hawier_tls_check_dns: true
+hawier_caddy_image: localhost/caddy:2-alpine
+hawier_caddy_source: docker.io/library/caddy:2-alpine
+hawier_db_name: hawkbit
+hawier_db_user: hawkbit
+
+# "<interface>:<port>" as docker publishes it. The node defaults to loopback:
+# it trusts X-Forwarded-For from whoever connects, so it belongs behind a
+# proxy and not on a public interface.
+hawier_publish_server: "127.0.0.1:8080"
+hawier_publish_ui: "0.0.0.0:8088"
+# Empty = not published at all. If you need it, write "127.0.0.1:5432" and
+# tunnel; there is no reason for a database port to face a network.
+hawier_publish_postgres: ""
+
+# No compose call may run longer than this. A compose that blocks forever is
+# the worst failure mode here: it looks exactly like one that is working.
+hawier_compose_timeout: 600
+# How long the play waits for the node to answer /health after `up -d`. Most of
+# it, on a first deploy, is the node creating the hawkBit schema.
+hawier_health_retries: 60
+hawier_health_delay: 5
+# Lines of each service's log printed when the stack does not come up.
+hawier_diag_log_lines: 50
+# Where the report lands on the machine that ran make. Absolute on purpose: a
+# relative dest on a localhost delegate resolves against the module's own
+# working directory, not the one make was run from, so the file goes somewhere
+# nobody looks. make passes this in; the default is for a bare ansible-playbook.
+hawier_report_path: "{{ (playbook_dir ~ '/../..') | realpath }}/hawier-{{ inventory_hostname }}.log"
+
+# Versions of hawier-{server,ui} images kept on the host for rollback.
+hawier_keep_images: 3
+# Free space required on the docker data root before shipping anything.
+hawier_min_free_mb: 4096
+# Which container engine the host uses. Empty = ask it: podman first, docker
+# second, the same order the Makefile uses. Pin it only when a machine has
+# both and means the other one.
+hawier_engine: ""
+# The engine on the machine running the play. `make deploy-<host>` passes its
+# own answer in, so the two agree; empty = probe it here too.
+hawier_local_engine: ""
+# Where the engine keeps its images, for the free-space check. Empty = ask it
+# (docker: /var/lib/docker, rootful podman: /var/lib/containers, rootless
+# podman: under the user's home).
+hawier_image_store: ""
+
+# true means the image stream loads through `sudo -n <engine>`, so sudo must
+# not ask for a password — --ask-become-pass cannot reach into that pipe. It
+# has to match how the play's own tasks run, because the stream is plain ssh
+# as ansible_user and not a become task: load into root's image store while
+# compose reads the deploy user's, and the failure reads as a missing image
+# right after a successful load. Rootless podman wants this false, together
+# with ansible_become: false and hawier_owner/hawier_group below. Preflight
+# checks the two agree.
+hawier_become_engine: true
+# Who owns {{ hawier_dir }} on the target. These move together with
+# hawier_become_engine: the default is a root-owned deploy; a host that
+# deploys as an unprivileged user — rootless podman, or membership of the
+# `docker` group — sets all three and runs the play with
+# `ansible_become: false`.
+hawier_owner: root
+hawier_group: root
+# Print the generated admin credentials on the deploy that creates them.
+# Turn off for CI; they stay readable in {{ hawier_dir }}/secrets/mgmt_users.
+hawier_show_credentials: true
+
+# Extension modules, as the server image lays them out (Dockerfile:75).
+# A path that does not exist stops the node at startup, on purpose.
+hawier_ext_dir: /usr/local/lib/hawier
+hawier_ext_storage: "{{ hawier_ext_dir }}/hawier_ext_fs.wasm"
+hawier_ext_event_sink: "{{ hawier_ext_dir }}/hawier_ext_webhook.wasm"
+hawier_ext_retention: "{{ hawier_ext_dir }}/hawier_ext_retention.wasm"
+hawier_ext_rollout: "{{ hawier_ext_dir }}/hawier_ext_rollout_classic.wasm"
+hawier_ext_console: "{{ hawier_ext_dir }}/hawier_ext_console.wasm"
+hawier_ext_authz: "{{ hawier_ext_dir }}/hawier_ext_authz.wasm"
+
+# A small host has to be able to say so. The defaults in the binary (10 and 20)
+# and in postgres (128 MB of shared buffers, 100 connections) assume a machine
+# with room; on 400 MB of RAM they are the difference between a stack that runs
+# and one the kernel keeps killing. max_connections has to cover both pools
+# plus the healthcheck, with a little to spare.
+hawier_mgmt_pool_size: 10
+hawier_ddi_pool_size: 20
+hawier_pg_shared_buffers: 128MB
+hawier_pg_max_connections: 100
+
+hawier_rust_log: "hawier_server=info,tower_http=info"
+hawier_ui_rust_log: "hawier_ui=info,tower_http=info"
+
+# Empty = generated once on the target and never rewritten. An override here
+# is written into the secrets file on the first deploy and read back from it
+# afterwards. Alphanumerics only: the postgres password goes into a
+# postgres:// URL, the admin password into HAWIER_MGMT_USERS (split on `,`
+# then `:`), and both through compose's .env substitution, where `$` starts
+# an interpolation.
+hawier_postgres_password: ""
+hawier_internal_token: ""
+hawier_mgmt_users: ""

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel form-panel">
+  <div class="section-title" data-help="console/views#editing">{{ title }}</div>
+  <form method="post" action="{{ action }}">
+    {%- match error %}
+    {%- when Some with (message) %}<div class="callout danger">{{ message }}</div>
+    {%- when None %}
+    {%- endmatch %}
+    <input type="hidden" name="resource" value="{{ resource }}">
+    <label data-help="console/views#saved-views">Name<input name="name" value="{{ name }}" required></label>
+    <label data-help="reference/rsql#the-query-language">FIQL<textarea name="q" rows="4">{{ q }}</textarea></label>
+    <label data-help="reference/sorting#sort-orders">Sort<input name="sort" value="{{ sort }}"></label>
+    <label data-help="reference/columns#choosing">Columns<input name="columns" value="{{ columns }}"></label>
+    <label data-help="console/lists#page-size">Page size<input name="limit" type="number" min="10" max="100" value="{{ limit }}"></label>
+    <div class="form-actions"><button class="primary-button" type="submit">Save</button></div>
+  </form>
+  {%- match manage %}
+  {%- when Some with (view) %}
+  <div class="form-actions secondary-actions" data-help="console/views#editing">
+    <form method="post" action="{{ view.delete_action }}" data-confirm="Delete view {{ name }}?"><button class="danger-button" type="submit">Delete</button></form>
+    <form method="post" action="{{ view.duplicate_action }}"><button type="submit">Duplicate</button></form>
+    <form method="post" action="{{ view.move_action }}"><input type="hidden" name="direction" value="up"><button type="submit">Move up</button></form>
+    <form method="post" action="{{ view.move_action }}"><input type="hidden" name="direction" value="down"><button type="submit">Move down</button></form>
+  </div>
+  {%- when None %}
+  {%- endmatch %}
+</section>
+{% endblock %}

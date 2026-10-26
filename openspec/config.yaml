@@ -1,0 +1,81 @@
+schema: spec-driven
+
+context: |
+  hawier is a Rust rewrite of Eclipse hawkBit: a device update server with
+  hawkBit-compatible Mgmt (/rest/v1) and DDI (/{tenant}/controller/v1) APIs on
+  PostgreSQL only, plus a server-side rendered console and a device simulator.
+  AMQP/DMF is deliberately not supported.
+
+  Stack: Rust 2021 (toolchain pinned in rust-toolchain.toml), axum 0.8, sqlx
+  without an ORM, askama templates, wasm32-wasip1 extension modules.
+
+  Monorepo:
+  - apps/server: crate hawier-server, binary hawier (Mgmt, DDI, /ui/v1, engines)
+  - apps/ui: crate hawier-ui, the console (state only via /ui/v1 and Mgmt)
+  - apps/client: crate hawier-client, binary hawier-device (simulator, load client)
+  - apps/ext-*: first-party wasm extensions (fs, s3, webhook, retention,
+    rollout-classic, rollout-bucket, console, authz), built by `make ext`
+  - libs/api: crate hawier-api, the only shared library (DTOs, enum codes)
+
+  Everything is driven through make (make lint / test / it / ui-audit / load /
+  deploy-<host>). Integration tests are one target per crate (tests/it/),
+  marked #[ignore], and run by `make it`.
+
+  Language: everything in the repository is English: specs and other OpenSpec
+  artifacts, project prose (README.md, ARCHITECTURE.md, EXTENSIONS.md,
+  API_NOTES.md, SCHEMA_NOTES.md, CLAUDE.md), code comments and commit
+  messages. `make lint` refuses Cyrillic in tracked files. The in-console
+  manual (apps/ui/docs) is product content and is not an OpenSpec artifact.
+
+  Specs describe what the code does. Where a document disagrees with the code,
+  the code wins. Where the code looks wrong, do not write the defect into a
+  SHALL: record it as a divergence (design.md of the change that found it),
+  then fix it through its own change.
+
+  The backlog of planned and unimplemented work lives in API_NOTES.md (API
+  shortcomings, doctrine, hardened profile), SCHEMA_NOTES.md (legacy schema
+  bottlenecks, marked `// NARROW:` / `-- NARROW:` in code) and the roadmap
+  parts of EXTENSIONS.md. A backlog item becomes a change when it is picked up.
+
+  Database: the schema is byte-compatible with hawkBit 1.0.0 for now. sp_*
+  tables must never change. hawier tables are hawier_* in the single
+  migration file 0001_hawier.sql, which is edited in place.
+
+rules:
+  proposal:
+    - Name capabilities by the existing flat paths under openspec/specs/
+      (console capabilities carry the `console-` prefix); add a new capability
+      only when no existing one covers the behavior.
+    - A change touching the DDI path, artifact delivery or the rollout engine
+      states in Impact that `make load` is compared with bench/load-history.csv
+      (a degradation above 20% at the same parameters is a regression).
+  specs:
+    - No internal Rust names (functions, modules, test names) in requirements;
+      describe observable behavior, inputs, outputs and errors.
+    - hawkBit wire compatibility is stated per surface (resource group, error
+      body); list hawier's additive keys and resources explicitly.
+    - Every timestamp on the wire is epoch milliseconds as a number; enum codes
+      come from libs/api/src/codes.rs.
+    - A new extension point is a delta to `extension-host` that states its
+      contract, execution site, what crosses the boundary (a decision or a
+      descriptor, never bytes or handles) and the declared refusal when the
+      module is absent. The rationale goes to EXTENSIONS.md.
+    - A new console list, column, view, form field, bulk operation or enum
+      value requires a section in the in-console manual (apps/ui/docs) and a
+      matching requirement in the relevant `console-*` spec.
+    - An API limitation that blocks the target architecture but is not fixed
+      by the change goes to API_NOTES.md as problem → plan → compatibility with
+      existing clients, the same way as SCHEMA_NOTES.md.
+  design:
+    - Changing the hardened profile means editing EXTENSIONS.md §5 and
+      API_NOTES §6 together.
+    - A newly found schema bottleneck gets a `NARROW:` comment in code and an
+      entry in SCHEMA_NOTES.md with its fix plan.
+  tasks:
+    - One slice per commit on master (no branches, no push); stage only the
+      slice's own changes.
+    - Every commit builds; run `make lint` before it, plus `make ui-audit` when
+      apps/ui or static/assets is touched.
+    - Console changes are verified on the live page, not only by compilation.
+    - A new console page or view gets its line in apps/ui/tests/it/ui_audit.rs
+      in the same commit.

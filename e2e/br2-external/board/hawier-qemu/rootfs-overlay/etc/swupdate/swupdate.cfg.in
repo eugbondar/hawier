@@ -1,0 +1,29 @@
+// Rendered to /run/swupdate.cfg at boot by S05hawier-identity. @NAME@ comes
+// from QEMU firmware configuration (the board "EEPROM") or from the slot.
+globals :
+{
+	public-key-file = "/etc/swupdate/public.pem";
+	select = "stable,to-@INACTIVE@";
+	fwenv-config-location = "/etc/fw_env.config";
+	postupdatecmd = "/sbin/reboot";
+	loglevel = 5;
+	verbose = true;
+};
+
+identify : (
+	{ name = "hw_revision"; value = "@REVISION@"; },
+	{ name = "slot"; value = "@SLOT@"; },
+	{ name = "version"; value = "@VERSION@"; }
+);
+
+suricatta :
+{
+	url = "@URL@";
+	tenant = "@TENANT@";
+	id = "@CONTROLLER_ID@";
+	targettoken = "@TARGET_TOKEN@";
+	polldelay = 5;
+	retry = 3;
+	retrywait = 5;
+	connection-timeout = 10;
+};

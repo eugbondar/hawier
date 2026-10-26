@@ -1,0 +1,22 @@
+# Builder for the reference device image (make e2e-image). Only what
+# Buildroot itself asks of a host, plus ccache and cmake: everything that
+# ends up in the image is built by Buildroot from pinned sources, never taken
+# from Debian. cmake is here because Buildroot accepts a host one (>= 3.18)
+# and otherwise builds its own, which is minutes of every cold CI run.
+#
+# Fully qualified, as every registry image in this repository: podman with
+# short-name-mode = enforcing cannot resolve a bare name without a TTY.
+FROM docker.io/library/debian:bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      bc binutils build-essential bzip2 ca-certificates ccache cmake cpio diffutils \
+      file findutils gawk git gzip make patch perl python3 rsync sed tar \
+      unzip wget which xz-utils openssl libncurses-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# Buildroot refuses nothing as root, but a few host packages' configure
+# scripts do; the image runs as the invoking user under docker anyway (see
+# e2e/e2e.mk), and as the mapped user under rootless podman.
+ENV FORCE_UNSAFE_CONFIGURE=1
+WORKDIR /src

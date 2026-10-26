@@ -1,0 +1,79 @@
+# Hosts hawier can be deployed to. One entry per machine; the name is what
+# `make deploy-<name>` takes.
+#
+# The simplest install is one edit and one command:
+#
+#   1. set ansible_host below to your server (and ansible_user, if not root);
+#   2. make deploy-server       build, ship and bring the stack up there;
+#   3. make creds-server        the console login, any time later.
+#
+# The server needs ssh, python3 and podman or docker with compose; nothing
+# else, not even internet access (README, "Deployment"). Preflight refuses a
+# host whose address is still an example.com placeholder.
+#
+# Required per host: ansible_host, ansible_user, and hawier_node_id (unique
+# among nodes sharing a database — the default is a hash of the container
+# hostname, which docker regenerates on every recreate, so incident numbers
+# would wander between deploys). ansible_port only when ssh is not on 22.
+#
+# Everything else has a default in group_vars/all.yml. Do not put real
+# passwords here: secrets are generated on the target on first deploy (see
+# roles/stack/tasks/secrets.yml); an override belongs in ansible-vault.
+#
+# Hosts you do not want in git go to inventory.local.yml next to this file
+# (ignored by git, same format); make reads both. Editing this file does not
+# make the working tree "dirty" for a deploy: the inventory is not part of
+# the images.
+#
+# `list` cannot be used as a host name — `make deploy-list` is its own target.
+all:
+  children:
+    hawier:
+      hosts:
+        server:
+          ansible_host: hawier.example.com
+          ansible_user: root
+          hawier_node_id: 1
+          # No proxy in front: the console (8088) and the device API (8080)
+          # listen on every interface. Fine for a first look; before real
+          # devices, turn on TLS (the next example) — see the X-Forwarded-For
+          # note in the README.
+          hawier_publish_server: "0.0.0.0:8080"
+          hawier_publish_ui: "0.0.0.0:8088"
+
+        # With TLS: Caddy in front obtains a Let's Encrypt certificate for
+        # the name, nothing else listens publicly. The name must already
+        # resolve to the host (preflight checks it); two names (console and
+        # devices) are better than one, because the node builds _links from
+        # the Host the device saw.
+        # updates:
+        #   ansible_host: updates.example.com
+        #   ansible_port: 2222
+        #   ansible_user: deploy
+        #   hawier_node_id: 2
+        #   hawier_tls: true
+        #   hawier_console_host: console.example.com
+        #   hawier_ddi_host: updates.example.com
+
+        # A small machine (one core, ~400 MB of RAM): the defaults assume
+        # room — postgres' 128 MB of shared buffers and 100 connection slots
+        # plus 30 pooled connections from the node do not fit together.
+        # max_connections covers both pools and the healthcheck.
+        # tiny:
+        #   ansible_host: tiny.example.com
+        #   ansible_user: root
+        #   hawier_node_id: 3
+        #   hawier_mgmt_pool_size: 4
+        #   hawier_ddi_pool_size: 8
+        #   hawier_pg_shared_buffers: 32MB
+        #   hawier_pg_max_connections: 24
+
+        # Behind your own TLS proxy: nothing listens on a public interface,
+        # and the proxy must set X-Forwarded-Proto and overwrite
+        # X-Forwarded-For (see README, "Deployment").
+        # behind-proxy:
+        #   ansible_host: 192.0.2.10
+        #   ansible_user: deploy
+        #   hawier_node_id: 4
+        #   hawier_publish_server: "127.0.0.1:8080"
+        #   hawier_publish_ui: "127.0.0.1:8088"

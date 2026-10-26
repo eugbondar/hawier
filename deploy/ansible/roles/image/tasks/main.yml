@@ -1,0 +1,217 @@
+---
+# Images are built on the machine that runs make and streamed to the host:
+# `save | <compressor> | ssh | load`. No registry, and no temporary tar on
+# either disk — the compression is what keeps the pipe fed, not a step of its
+# own.
+#
+# The two ends may run different engines: podman here and docker there, or the
+# other way round. Two things that cost a deploy to learn about that:
+#
+#   * A load renames what it reads. podman qualifies an unqualified name with
+#     `localhost/`; docker normalises `docker.io/library/x` down to `x` before
+#     saving. So a name chosen on one side is not the name the other ends up
+#     with, the compose file over there asks for an image the host does not
+#     have under that name, and podman-compose answers that by trying to pull
+#     it — ignoring `pull_policy: never` while it does, which on a host with no
+#     route out is an unbounded hang. Every deployed ref is therefore already
+#     registry-qualified (`localhost/...`), which both engines pass through
+#     verbatim in both directions.
+#   * The ids cannot stand in for the names: docker and podman compute
+#     different ids for the same image. Tagging by id answers "image not
+#     known", and comparing by id reships everything on every deploy.
+
+- name: what this host should be running
+  ansible.builtin.set_fact:
+    # Ours: they exist nowhere but on the machine that built them.
+    hawier_app_refs:
+      - "{{ hawier_repo }}:{{ hawier_version }}-server"
+      - "{{ hawier_repo }}:{{ hawier_version }}-ui"
+
+# Under `delegate_to: localhost` the connection variables resolve to the
+# DELEGATE's values, not the target's. Facts belong to the inventory host and
+# survive delegation, so the ssh command line is assembled here, undelegated.
+- name: the ssh command the image stream will use
+  ansible.builtin.set_fact:
+    hawier_ssh_cmd: >-
+      ssh -T -o BatchMode=yes
+      -p {{ ansible_port | default(22) }}
+      {{ ('-i ' ~ ansible_ssh_private_key_file) if (ansible_ssh_private_key_file | default('')) else '' }}
+      {{ ansible_ssh_common_args | default('') }}
+      {{ ansible_ssh_extra_args | default('') }}
+      {{ (ansible_user ~ '@') if (ansible_user | default('')) else '' }}{{ ansible_host | default(inventory_hostname) }}
+    # -T: a pty would mangle the binary stream.
+    # BatchMode=yes: a password prompt in this pipe hangs the whole deploy.
+    hawier_remote_engine: "{{ ('sudo -n ' if hawier_become_engine else '') ~ hawier_engine }}"
+
+- name: the engine on this machine
+  # Podman first, docker second, same order as the Makefile — which passes its
+  # own answer in as hawier_local_engine, so a `make deploy-<host>` and a bare
+  # ansible-playbook agree.
+  ansible.builtin.command: sh -c 'command -v podman || command -v docker'
+  delegate_to: localhost
+  become: false
+  register: hawier_local_engine_probe
+  changed_when: false
+  failed_when: hawier_local_engine_probe.rc != 0 and (hawier_local_engine | default('')) | length == 0
+
+- name: remember it
+  ansible.builtin.set_fact:
+    hawier_local_engine: >-
+      {{ hawier_local_engine if (hawier_local_engine | default('') | length > 0)
+         else (hawier_local_engine_probe.stdout_lines[0] | basename) }}
+
+- name: zstd on this machine
+  ansible.builtin.command: sh -c 'command -v zstd'
+  delegate_to: localhost
+  become: false
+  register: hawier_zstd_local
+  changed_when: false
+  failed_when: false
+
+# Level 3 / -1 on purpose: the stream is CPU-bound on layers of already
+# compressed binaries, and the job of the compressor is to keep the pipe busy,
+# not to win a ratio. The decompressor is named explicitly although a load can
+# sniff it — which codecs it knows varies by engine and version, and an
+# explicit command gives a readable error instead of "unexpected EOF".
+- name: pick a compressor both ends have
+  ansible.builtin.set_fact:
+    hawier_compress: "{{ 'zstd -T0 -3 -c' if (hawier_zstd_local.rc == 0 and hawier_have_zstd_remote) else 'gzip -1 -c' }}"
+    hawier_decompress: "{{ 'zstd -dc' if (hawier_zstd_local.rc == 0 and hawier_have_zstd_remote) else 'gzip -dc' }}"
+
+# The images that start life in a registry, and this machine is the only one
+# allowed to ask one. Each is fetched under its source name and then named the
+# way the host will know it: the rename belongs on this side, because the
+# compose file over there asks for one exact ref.
+- name: the images that come from a registry
+  ansible.builtin.set_fact:
+    hawier_external_images: >-
+      {{ [{'source': hawier_postgres_source, 'name': hawier_postgres_image}]
+         + ([{'source': hawier_caddy_source, 'name': hawier_caddy_image}] if hawier_tls | bool else []) }}
+
+- name: are they here to send?
+  ansible.builtin.command:
+    argv: ["{{ hawier_local_engine }}", images, --no-trunc, --quiet, "{{ item.name }}"]
+  loop: "{{ hawier_external_images }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: localhost
+  become: false
+  register: hawier_external_local
+  changed_when: false
+
+- name: fetch what is missing onto this machine, the only one allowed to
+  ansible.builtin.command:
+    argv: ["{{ hawier_local_engine }}", pull, "{{ item.item.source }}"]
+  loop: "{{ hawier_external_local.results }}"
+  loop_control:
+    label: "{{ item.item.source }}"
+  delegate_to: localhost
+  become: false
+  when: item.stdout | trim == ''
+  changed_when: true
+
+- name: and call it what the host will call it
+  ansible.builtin.command:
+    argv: ["{{ hawier_local_engine }}", tag, "{{ item.item.source }}", "{{ item.item.name }}"]
+  loop: "{{ hawier_external_local.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  delegate_to: localhost
+  become: false
+  when: item.stdout | trim == ''
+  changed_when: true
+
+- name: what has to cross the network
+  ansible.builtin.set_fact:
+    hawier_image_refs: "{{ hawier_app_refs + (hawier_external_images | map(attribute='name') | list) }}"
+
+# Presence of the exact ref, and not equality of ids — see the header. The tag
+# is vYY.MM.DD-<sha> of a tree the deploy refuses to build dirty, so the name
+# identifies the content.
+- name: which of them the host already has
+  ansible.builtin.command:
+    argv: ["{{ hawier_engine }}", images, --no-trunc, --quiet, "{{ item }}"]
+  loop: "{{ hawier_image_refs }}"
+  register: hawier_remote_refs
+  changed_when: false
+
+- name: every image this host is missing
+  ansible.builtin.set_fact:
+    hawier_missing: "{{ hawier_missing | default([]) + [item.0] }}"
+  loop: >-
+    {{ hawier_image_refs | zip(hawier_remote_refs.results | map(attribute='stdout') | list) | list }}
+  loop_control:
+    label: "{{ item.0 }}"
+  when: (item.1 | trim) | length == 0
+
+- name: nothing to ship
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} already has {{ hawier_image_refs | join(', ') }}"
+  when: (hawier_missing | default([])) | length == 0
+
+# `images` takes one repository argument, `image inspect` takes many — and
+# every ref here exists locally, so its non-zero exit on a miss is not a
+# concern.
+- name: the size of what is about to cross the network
+  ansible.builtin.command:
+    # A {% raw %} block cannot live inside a {{ }} expression, so this is a
+    # command line rather than an argv list.
+    cmd: "{{ hawier_local_engine }} image inspect --format '{% raw %}{{.Size}}{% endraw %}' {{ hawier_missing | join(' ') }}"
+  delegate_to: localhost
+  become: false
+  register: hawier_ship_size
+  changed_when: false
+  when: (hawier_missing | default([])) | length > 0
+
+# A silent multi-minute pause is easier to wait through with a number on it.
+# `| int` before human_readable is load-bearing and not tidiness: stdout_lines
+# are strings, and the filter compares its argument to an int, so a bare string
+# aborts the play — from a progress message. It also turns anything unexpected
+# from inspect into 0 rather than an error.
+- name: what it comes to
+  ansible.builtin.debug:
+    msg: >-
+      shipping {{ hawier_missing | length }} image(s) from
+      {{ hawier_local_engine }} to {{ inventory_hostname }}'s
+      {{ hawier_engine }}:
+      {{ hawier_missing | zip(hawier_ship_size.stdout_lines | map('int') | map('human_readable'))
+         | map('join', ' ') | join(', ') }}
+      uncompressed, through {{ hawier_compress.split()[0] }}
+  when: (hawier_missing | default([])) | length > 0
+
+- name: ship them
+  ansible.builtin.shell:
+    # `set -o pipefail` is the most important line in this role: without it a
+    # `save` that dies mid-stream still exits 0 (ssh did), and the play goes
+    # green having shipped nothing, or half an image.
+    cmd: >-
+      set -o pipefail;
+      {{ hawier_local_engine }} save {{ hawier_missing | join(' ') }}
+      | {{ hawier_compress }}
+      | {{ hawier_ssh_cmd }} '{{ hawier_decompress }} | {{ hawier_remote_engine }} load'
+    executable: /bin/bash
+  delegate_to: localhost
+  become: false
+  when: (hawier_missing | default([])) | length > 0
+  changed_when: true
+
+# Checked before compose is ever called, because podman-compose answers a
+# missing image by trying to pull it and hangs there — a sentence beats an
+# unbounded wait, and this is the failure the naming rules above exist to stop.
+- name: every name the compose file asks for is on the host
+  ansible.builtin.command:
+    argv: ["{{ hawier_engine }}", images, --no-trunc, --quiet, "{{ item }}"]
+  loop: "{{ hawier_image_refs }}"
+  register: hawier_refs_after
+  changed_when: false
+
+- name: they are
+  ansible.builtin.assert:
+    that: hawier_refs_after.results | map(attribute='stdout') | map('trim') | reject('equalto', '') | list | length == hawier_image_refs | length
+    fail_msg: >-
+      after the transfer {{ inventory_hostname }} still does not have every
+      name its compose file asks for. A load renames what it reads, so this is
+      a naming mismatch and not a lost byte: compare hawier_repo and
+      hawier_postgres_image against what `{{ hawier_engine }} images` shows
+      there.
+    quiet: true

@@ -1,0 +1,205 @@
+---
+# Everything that makes a deploy fail late, checked while it is still cheap.
+
+# The shipped inventory names a placeholder server, and the first thing a new
+# user runs is `make deploy-server` before editing it. `assert` runs on this
+# machine, so the answer is a sentence about the file instead of an ssh
+# timeout against example.com. Documentation addresses (RFC 2606 names,
+# RFC 5737 networks) can never be a real host.
+- name: the host is not an example placeholder
+  ansible.builtin.assert:
+    that: >-
+      not (hawier_target_address is regex('(^|\.)example\.(com|net|org)$'))
+      and not (hawier_target_address is regex('^(192\.0\.2|198\.51\.100|203\.0\.113)\.'))
+    fail_msg: >-
+      {{ inventory_hostname }} still points at the placeholder
+      {{ hawier_target_address }}. Set its ansible_host (and ansible_user, if
+      not root) in deploy/ansible/inventory.yml to your server, then run
+      `make deploy-{{ inventory_hostname }}` again.
+    quiet: true
+  vars:
+    hawier_target_address: "{{ (ansible_host | default(inventory_hostname)) | string | lower }}"
+
+# `raw` first, because it is the one module that needs nothing on the far end.
+# Every other task here — and in the whole role — is python, so without an
+# interpreter the run dies in fact gathering with a traceback about
+# ansible.legacy.setup, which tells an operator nothing about their host.
+- name: python on the target
+  ansible.builtin.raw: command -v python3 || command -v python
+  register: hawier_python_probe
+  changed_when: false
+  failed_when: false
+
+- name: there is one
+  ansible.builtin.assert:
+    that: hawier_python_probe.rc == 0
+    fail_msg: >-
+      {{ inventory_hostname }} has no python interpreter, and ansible needs one
+      on the host for everything except this check. On Debian or Ubuntu:
+      `apt-get install -y python3`. This playbook does not install it, for the
+      same reason it does not install a container engine.
+    quiet: true
+
+# Podman first, docker second — the same order the Makefile uses. Only the
+# shared part of the CLI is ever called (build, images, save, load, pull,
+# rmi, compose), so the rest of the play does not care which one answered.
+# Pin it per host with hawier_engine if a machine has both and means the
+# other one.
+- name: which container engine this host has
+  ansible.builtin.command: sh -c 'command -v podman || command -v docker'
+  register: hawier_engine_probe
+  changed_when: false
+  failed_when: false
+
+- name: it has one
+  ansible.builtin.assert:
+    that: hawier_engine | default('') | length > 0 or hawier_engine_probe.rc == 0
+    fail_msg: >-
+      neither podman nor docker is installed on {{ inventory_hostname }}.
+      This playbook does not install one: untangling distributions for a
+      one-off step is its own project, and whoever owns the host has already
+      decided where its engine comes from.
+    quiet: true
+
+- name: remember it
+  ansible.builtin.set_fact:
+    hawier_engine: >-
+      {{ hawier_engine if (hawier_engine | default('') | length > 0)
+         else (hawier_engine_probe.stdout_lines[0] | basename) }}
+
+- name: the engine answers as the user this play runs as
+  # No --format: docker prints .ServerVersion there and podman does not, and
+  # the question here is only whether the socket answers at all — which is
+  # where "not in the group and sudo wants a password" shows up.
+  ansible.builtin.command: "{{ hawier_engine }} info"
+  register: hawier_engine_info
+  changed_when: false
+  failed_when: hawier_engine_info.rc != 0
+
+# `podman compose` exists from podman 4.9 and hands off to an external
+# provider; before that it is the separate `podman-compose` binary. Either
+# will do, so ask for the subcommand first and fall back to the standalone.
+- name: the engine's own compose subcommand
+  ansible.builtin.command: "{{ hawier_engine }} compose version"
+  register: hawier_compose_sub
+  changed_when: false
+  failed_when: false
+
+- name: a standalone compose
+  ansible.builtin.command: "{{ hawier_engine }}-compose version"
+  register: hawier_compose_standalone
+  changed_when: false
+  failed_when: false
+  when: hawier_compose_sub.rc != 0
+
+- name: one of them answered
+  ansible.builtin.assert:
+    that: hawier_compose_sub.rc == 0 or hawier_compose_standalone.rc | default(1) == 0
+    fail_msg: >-
+      {{ hawier_engine }} has no compose support on {{ inventory_hostname }}:
+      neither `{{ hawier_engine }} compose version` nor
+      `{{ hawier_engine }}-compose version` answered.
+      {{ 'Install podman-compose, or podman 4.9+ with docker-compose present.'
+         if hawier_engine == 'podman'
+         else 'Install the compose v2 plugin; v1 `docker-compose` alone is not enough.' }}
+    quiet: true
+
+# Named once, used everywhere. No --project-directory and no --env-file: those
+# are the flags the implementations disagree about, every compose task chdirs
+# into the stack directory instead, and there is no .env left to point at — the
+# compose file carries its own values, because trusting compose to read that
+# file was how POSTGRES_PASSWORD arrived empty under podman-compose.
+- name: how to call compose here
+  ansible.builtin.set_fact:
+    hawier_compose_cmd: >-
+      {{ ([hawier_engine, 'compose'] if hawier_compose_sub.rc == 0 else [hawier_engine ~ '-compose'])
+         + ['-p', hawier_project, '-f', 'docker-compose.yml'] }}
+
+# ACME needs the name to resolve, publicly, to this host — that is the whole
+# validation. See the script for what a name pointing elsewhere costs. On a
+# machine behind NAT its public address is not on any interface, so set
+# hawier_tls_check_dns: false there and own the consequence.
+- name: the TLS names point at this host
+  ansible.builtin.script:
+    cmd: >-
+      tls_dns.sh {{ [hawier_console_host, hawier_ddi_host] | unique | join(' ') }}
+  register: hawier_tls_dns
+  changed_when: false
+  failed_when: false
+  when: hawier_tls | bool and hawier_tls_check_dns | bool
+
+- name: they do
+  ansible.builtin.assert:
+    that: (hawier_tls_dns.stdout | default('') | trim) | length == 0
+    fail_msg: >-
+      {{ hawier_tls_dns.stdout | default('') | trim }}
+      — Caddy would keep retrying ACME against that and serve nothing.
+    quiet: true
+  when: hawier_tls | bool and hawier_tls_check_dns | bool
+
+- name: zstd on the target
+  ansible.builtin.command: sh -c 'command -v zstd'
+  register: hawier_zstd_remote
+  changed_when: false
+  failed_when: false
+
+# Asked rather than assumed: docker keeps them under /var/lib/docker, rootful
+# podman under /var/lib/containers, rootless podman under the user's home.
+# Each engine names the field differently, so try podman's and fall back.
+- name: where the engine keeps its images
+  ansible.builtin.command:
+    cmd: >-
+      sh -c '{{ hawier_engine }} info --format "{% raw %}{{.Store.GraphRoot}}{% endraw %}" 2>/dev/null
+      || {{ hawier_engine }} info --format "{% raw %}{{.DockerRootDir}}{% endraw %}"'
+  register: hawier_store_probe
+  changed_when: false
+  failed_when: false
+
+- name: remember it
+  ansible.builtin.set_fact:
+    hawier_image_store: >-
+      {{ hawier_image_store if (hawier_image_store | default('') | length > 0)
+         else (hawier_store_probe.stdout | trim if (hawier_store_probe.stdout | trim | length > 0) else '/') }}
+
+- name: free space where the engine keeps its images
+  ansible.builtin.command: "df -Pk {{ hawier_image_store }}"
+  register: hawier_store_df
+  changed_when: false
+
+- name: there is room for the images
+  ansible.builtin.assert:
+    # Both sides cast: a value from -e or a quoted inventory entry is a
+    # string, and `int >= str` raises rather than compares.
+    that: (hawier_store_df.stdout_lines[-1].split()[3] | int) // 1024 >= (hawier_min_free_mb | int)
+    fail_msg: >-
+      {{ hawier_image_store }} has
+      {{ (hawier_store_df.stdout_lines[-1].split()[3] | int) // 1024 }} MB free,
+      less than the {{ hawier_min_free_mb }} MB a load needs for the
+      decompressed layers plus the versions kept for rollback.
+    quiet: true
+
+- name: remember what the target can do
+  ansible.builtin.set_fact:
+    hawier_have_zstd_remote: "{{ hawier_zstd_remote.rc == 0 }}"
+
+# The play's own tasks run through become; the image stream does not — it is
+# plain ssh as ansible_user. So the two can end up at different image stores,
+# and rootless podman makes that certain, its store being under the user's
+# home. The failure then reads as a missing image, right after a load that
+# reported success. Ask who the tasks are, rather than guessing from
+# ansible_become, which a play-level `become: true` does not set.
+- name: who the engine runs as in this play
+  ansible.builtin.command: id -u
+  register: hawier_task_uid
+  changed_when: false
+
+- name: the stream and the stack must reach the same image store
+  ansible.builtin.assert:
+    that: (hawier_become_engine | bool) == (hawier_task_uid.stdout | trim == '0')
+    fail_msg: >-
+      this play's tasks run as uid {{ hawier_task_uid.stdout | trim }} while
+      hawier_become_engine is {{ hawier_become_engine }}, so images would be
+      loaded into one store and looked for in another. Set both or neither:
+      rootless podman wants neither, and the deploy user then also has to own
+      {{ hawier_dir }} (hawier_owner / hawier_group).
+    quiet: true

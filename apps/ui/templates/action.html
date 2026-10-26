@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block content %}
+<section class="panel">
+  <div class="resource-toolbar">
+    <strong data-help="deployment/actions#actions">Action {{ action_id }}</strong>
+    <a class="ghost-button" href="{{ target_href }}">{{ controller_id }}</a>
+    {%- if cancellable %}
+    <form class="inline-form" method="post" action="{{ cancel_action }}" data-confirm="Cancel action {{ action_id }}?" data-help="deployment/actions#cancelling"><button class="ghost-button" type="submit">Cancel</button></form>
+    <form class="inline-form" method="post" action="{{ cancel_action }}" data-confirm="FORCE-quit action {{ action_id }}? The device gets no cancel order." data-help="reference/sharp-edges#force-quit"><input type="hidden" name="force" value="true"><button class="danger-button" type="submit">Force quit</button></form>
+    {%- endif %}
+  </div>
+  <table class="property-table"><tbody>
+    <tr><th data-help="deployment/actions#state">State</th><td><span class="status-pill {{ crate::view::status_class(detail.as_str()) }}" data-help="glossary#{{ detail }}">{{ detail }}</span> ({{ status }})</td></tr>
+    <tr><th data-help="deployment/action-types#action-types">Type</th><td>{{ kind }}</td></tr>
+    <tr><th data-help="repository/distribution-sets#distribution-sets">Distribution set</th><td>{% call m::cell(distribution_set) %}{% endcall %}</td></tr>
+  </tbody></table>
+</section>
+<section class="panel" data-autorefresh="5">
+  <div class="section-title" data-help="deployment/actions#status-history">Status history</div>
+  <table class="data-table">
+    <thead><tr><th>Time</th><th>Status</th><th>Code</th><th>Messages</th></tr></thead>
+    <tbody>
+      {%- if statuses.is_empty() %}
+      <tr><td class="muted" colspan="4">No status reports yet.</td></tr>
+      {%- else %}
+      {%- for row in statuses %}
+      <tr>
+        <td>{% call m::cell(row.time) %}{% endcall %}
+          {%- if row.reports > 1 %}
+          <span class="repeat-count" data-help="deployment/actions#repeated-reports">×{{ row.reports }}</span>
+          <span class="muted">last {% call m::cell(row.last_time) %}{% endcall %}</span>
+          {%- endif %}
+        </td>
+        <td><span class="status-pill {{ crate::view::status_class(row.kind.as_str()) }}" data-help="glossary#{{ row.kind }}">{{ row.kind }}</span></td>
+        <td>{{ row.code }}</td>
+        <td>{% for message in row.messages %}{{ message }}<br>{% endfor %}</td>
+      </tr>
+      {%- endfor %}
+      {%- endif %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

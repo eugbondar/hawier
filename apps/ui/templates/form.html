@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block content %}
+<section class="panel form-panel">
+  <div class="section-title" data-help="{{ layout.help }}">{{ title }}</div>
+  {%- match blocked %}
+  {%- when Some with (message) %}
+  <div class="callout danger">{{ message }}</div>
+  {%- when None %}
+  <form method="post" action="{{ action }}">
+    {%- match error %}
+    {%- when Some with (message) %}<div class="callout danger">{{ message }}</div>
+    {%- when None %}
+    {%- endmatch %}
+    {%- match next %}
+    {%- when Some with (target) %}<input type="hidden" name="next" value="{{ target }}">
+    {%- when None %}
+    {%- endmatch %}
+    {%- for field in fields %}
+    <label data-help="{{ field.help }}">{{ field.label }}
+      {%- match field.input %}
+      {%- when InputKind::Text %}
+      <input name="{{ field.name }}" value="{{ field.value }}"{% if field.required %} required{% endif %}>
+      {%- when InputKind::TextArea %}
+      <textarea name="{{ field.name }}" rows="4"{% if field.required %} required{% endif %}>{{ field.value }}</textarea>
+      {%- when InputKind::Checkbox %}
+      <input type="checkbox" name="{{ field.name }}"{% if field.checked %} checked{% endif %}>
+      {%- when InputKind::Select %}
+      <select name="{{ field.name }}"{% if field.required %} required{% endif %}>
+        {%- for option in field.options %}<option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>{% endfor %}
+      </select>
+      {%- when InputKind::Picker %}
+      {%- match field.picker %}
+      {%- when Some with (picker) %}{% call m::picker(picker) %}{% endcall %}
+      {%- when None %}
+      {%- endmatch %}
+      {%- endmatch %}
+      {%- if field.hint.len() > 0 %}<span class="field-hint">{{ field.hint }}</span>{% endif %}
+      {%- match field.error %}
+      {%- when Some with (message) %}<span class="field-error">{{ message }}</span>
+      {%- when None %}
+      {%- endmatch %}
+    </label>
+    {%- endfor %}
+    <div class="form-actions" data-help="console/lists#creating"><button class="primary-button" type="submit">Save</button></div>
+  </form>
+  {%- endmatch %}
+</section>
+{% endblock %}

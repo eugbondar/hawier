@@ -1,0 +1,276 @@
+{%- import "macros.html" as m -%}
+{#- Composable detail panels, reused across resource pages. -#}
+
+{% macro rollout(panel) %}
+<section class="panel">
+  <div class="section-title" data-help="deployment/rollouts#progress">Progress</div>
+  {%- for bar in panel.bars.iter() %}
+  <div class="progress-row"><span class="progress-label">{{ bar.label }}</span><div class="progress-track"><div class="progress-fill {{ bar.class }}" style="width:{{ bar.percent }}%"></div></div><span class="progress-count">{{ bar.count }}</span></div>
+  {%- endfor %}
+</section>
+<section class="panel">
+  <div class="section-title" data-help="deployment/rollout-groups#deploy-groups">Deploy groups</div>
+  <table class="data-table">
+    <thead><tr><th>Group</th><th>Status</th><th>Targets</th><th>Success %</th><th>Error %</th></tr></thead>
+    <tbody>
+      {%- for group in panel.groups.iter() %}
+      <tr><td><a href="{{ group.href }}">{{ group.name }}</a></td><td><span class="status-pill {{ crate::view::status_class(group.status.as_str()) }}" data-help="glossary#{{ group.status }}">{{ group.status }}</span></td><td>{{ group.total }}</td><td>{{ group.success }}</td><td>{{ group.error }}</td></tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+</section>
+{% endmacro %}
+
+{% macro artifacts(panel) %}
+<div class="artifacts-panel" data-help="repository/artifacts#artifacts">
+  <table class="data-table">
+    <thead><tr><th>File</th><th>Size</th><th>SHA1</th><th></th></tr></thead>
+    <tbody>
+      {%- for row in panel.rows.iter() %}
+      <tr>
+        <td><a href="{{ row.download_href }}">{{ row.name }}</a></td>
+        <td>{{ row.size }}</td>
+        <td><code title="{{ row.sha1 }}">{{ row.sha1_short }}</code> <button type="button" class="ghost-button" data-copy="{{ row.sha1 }}">copy</button></td>
+        <td><form method="post" action="{{ row.delete_action }}" data-confirm="Delete artifact {{ row.name }}?"><input type="hidden" name="next" value="{{ panel.next }}"><button class="danger-button" type="submit">Delete</button></form></td>
+      </tr>
+      {%- endfor %}
+    </tbody>
+  </table>
+  <form class="inline-form" method="post" action="{{ panel.upload_action }}" enctype="multipart/form-data" data-help="repository/artifacts#uploading"><input type="hidden" name="next" value="{{ panel.next }}"><input type="file" name="file" required><button class="primary-button" type="submit">Upload artifact</button></form>
+</div>
+{% endmacro %}
+
+{% macro tags(panel) %}
+<div class="section-title" data-help="inventory/target-tags#tags">Tags</div>
+{% call m::chips(panel.chips) %}{% endcall %}
+<form class="inline-form" method="post" action="{{ panel.add_action }}">{% call m::picker(panel.picker) %}{% endcall %}<button class="primary-button" type="submit">Add tag</button></form>
+<a class="ghost-button" href="{{ panel.create_href }}">Create tag</a>
+{% endmacro %}
+
+{% macro distribution_set(panel) %}
+<section class="panel">
+  <div class="section-title" data-help="repository/distribution-sets#where-this-set-is">Where this set is</div>
+  <div class="stat-grid">
+    {%- for card in panel.usage.iter() %}
+    <a class="stat-card" href="{{ card.href }}"><span class="stat-value">{{ card.count }}</span><span class="stat-label">{{ card.label }}</span></a>
+    {%- endfor %}
+  </div>
+</section>
+<section class="panel">
+  <div class="section-title" data-help="repository/distribution-sets#modules">Modules &amp; artifacts</div>
+  {%- for module in panel.modules.iter() %}
+  <details class="module-node" open>
+    <summary><strong>{{ module.name }}</strong> {{ module.version }} <span class="muted">({{ module.kind }})</span>
+      <form class="inline-form" method="post" action="{{ module.detach_action }}" data-confirm="Detach {{ module.name }}?"><input type="hidden" name="next" value="{{ panel.next }}"><button class="ghost-button" type="submit">Detach</button></form>
+    </summary>
+    {% call artifacts(module.artifacts) %}{% endcall %}
+  </details>
+  {%- endfor %}
+  <div class="panel-actions">
+    <form class="inline-form" method="post" action="{{ panel.attach_action }}" data-help="repository/distribution-sets#modules"><input type="hidden" name="next" value="{{ panel.next }}">{% call m::picker(panel.attach_picker) %}{% endcall %}<button class="primary-button" type="submit">Attach module</button></form>
+    <a class="ghost-button" href="{{ panel.create_module_href }}">Create module</a>
+    <a class="primary-button" href="{{ panel.rollout_href }}" data-help="deployment/rollouts#rollouts">Create rollout from this DS</a>
+  </div>
+</section>
+<section class="panel">{% call tags(panel.tags) %}{% endcall %}</section>
+{% call metadata(panel.metadata) %}{% endcall %}
+{% endmacro %}
+
+{% macro target(panel) %}
+<div class="dashboard-grid">
+  <section class="panel">
+    <div class="section-title" data-help="inventory/identity#attributes">Device attributes</div>
+    <table class="property-table"><tbody>
+      {%- if panel.attributes.is_empty() %}
+      <tr><td class="muted">No attributes reported yet.</td></tr>
+      {%- else %}
+      {%- for field in panel.attributes.iter() %}
+      <tr><th>{{ field.key }}</th><td>{% call m::cell(field.cell) %}{% endcall %}</td></tr>
+      {%- endfor %}
+      {%- endif %}
+    </tbody></table>
+  </section>
+  <section class="panel">
+    <div class="section-title" data-help="inventory/targets#security-token">Security token</div>
+    <div class="token-row"><code data-token="{{ panel.token }}">••••••••</code> <button type="button" class="ghost-button" data-reveal-token>Show</button> <button type="button" class="ghost-button" data-copy="{{ panel.token }}">Copy</button></div>
+    <div class="section-title" data-help="deployment/assignment#assigning">Assign distribution set</div>
+    <form class="inline-form" method="post" action="{{ panel.assign_action }}">
+      {% call m::picker(panel.assign_picker) %}{% endcall %}
+      <select name="type" aria-label="Action type" data-help="deployment/action-types#action-types"><option value="forced">forced</option><option value="soft">soft</option><option value="downloadonly">download only</option></select>
+      <button class="primary-button" type="submit">Assign</button>
+    </form>
+  </section>
+</div>
+<section class="panel">
+  {% call tags(panel.tags) %}{% endcall %}
+  {% call group(panel.group) %}{% endcall %}
+  <div class="section-title" data-help="inventory/target-types#target-types">Target type</div>
+  <form class="inline-form" method="post" action="{{ panel.type_action }}">{% call m::picker(panel.type_picker) %}{% endcall %}<button class="primary-button" type="submit">Set type</button></form>
+  <div class="section-title" data-help="deployment/confirmation#auto-confirmation">Auto-confirmation</div>
+  <div class="token-row">
+    {%- if panel.auto_confirm_active %}
+    <span class="status-pill ok" data-help="glossary#active">active</span>
+    <form class="inline-form" method="post" action="{{ panel.auto_confirm_action }}" data-confirm="Deactivate auto-confirmation?"><button class="ghost-button" type="submit">Deactivate</button></form>
+    {%- else %}
+    <span class="status-pill neutral" data-help="glossary#inactive">inactive</span>
+    <form class="inline-form" method="post" action="{{ panel.auto_confirm_action }}"><button class="ghost-button" type="submit">Activate</button></form>
+    {%- endif %}
+  </div>
+</section>
+{% call metadata(panel.metadata) %}{% endcall %}
+<section class="panel">
+  <div class="section-title" data-help="deployment/actions#actions">Device actions</div>
+  <table class="data-table">
+    <thead><tr><th>ID</th><th>Detail</th><th>Type</th><th>State</th><th></th></tr></thead>
+    <tbody>
+      {%- if panel.actions.is_empty() %}
+      <tr><td class="muted" colspan="5">No actions yet.</td></tr>
+      {%- else %}
+      {%- for action in panel.actions.iter() %}
+      <tr>
+        <td><a href="{{ action.href }}">{{ action.id }}</a></td>
+        <td><span class="status-pill {{ crate::view::status_class(action.detail.as_str()) }}" data-help="glossary#{{ action.detail }}">{{ action.detail }}</span></td>
+        <td>{{ action.kind }}</td>
+        <td>{{ action.status }}</td>
+        <td>{% match action.cancel_action %}{% when Some with (cancel) %}<form class="inline-form" method="post" action="{{ cancel }}" data-confirm="Cancel action {{ action.id }}?"><button class="ghost-button" type="submit">Cancel</button></form>{% when None %}{% endmatch %}</td>
+      </tr>
+      {%- endfor %}
+      {%- endif %}
+    </tbody>
+  </table>
+</section>
+{% endmacro %}
+
+{% macro incident(panel) %}
+<section class="panel">
+  <div class="section-title" data-help="admin/incidents#incident-numbers">Where this number came from</div>
+  <table class="property-table"><tbody>
+    <tr><th>Number</th><td><code>{{ panel.number }}</code> <button type="button" class="ghost-button" data-copy="{{ panel.number }}">Copy</button></td></tr>
+    <tr><th>Recorded</th><td>{% call m::cell(panel.recorded) %}{% endcall %}</td></tr>
+    <tr><th>Node</th><td>{{ panel.node }} (sequence {{ panel.sequence }} within that millisecond)</td></tr>
+  </tbody></table>
+</section>
+<section class="panel">
+  <div class="section-title" data-help="admin/action-log#the-action-log">Related console actions</div>
+  <table class="data-table">
+    <thead><tr><th>Time</th><th>Task</th><th>Status</th><th>Error</th></tr></thead>
+    <tbody>
+      {%- if panel.logs.is_empty() %}
+      <tr><td class="muted" colspan="4">No UI tasks reference this incident.</td></tr>
+      {%- else %}
+      {%- for log in panel.logs.iter() %}
+      <tr><td>{% call m::cell(log.time) %}{% endcall %}</td><td>{{ log.task }}</td><td><span class="status-pill {{ crate::view::status_class(log.status.as_str()) }}" data-help="glossary#{{ log.status }}">{{ log.status }}</span></td><td>{{ log.error }}</td></tr>
+      {%- endfor %}
+      {%- endif %}
+    </tbody>
+  </table>
+</section>
+{% endmacro %}
+
+{% macro ds_type(panel) %}
+<section class="panel">
+  <div class="section-title" data-help="repository/ds-types#mandatory-and-optional">Mandatory module types</div>
+  {% call m::chips(panel.mandatory) %}{% endcall %}
+  <div class="section-title" data-help="repository/ds-types#mandatory-and-optional">Optional module types</div>
+  {% call m::chips(panel.optional) %}{% endcall %}
+  <form class="inline-form" method="post" action="{{ panel.add_action }}">
+    {% call m::picker(panel.picker) %}{% endcall %}
+    <select name="kind" aria-label="Requirement" data-help="repository/ds-types#mandatory-and-optional"><option value="optional">optional</option><option value="mandatory">mandatory</option></select>
+    <button class="primary-button" type="submit">Add module type</button>
+  </form>
+</section>
+{% endmacro %}
+
+{#- Free-form key/value pairs. Values print as plain text: a value of
+    `error` must not turn into a status pill and read as device state. -#}
+{% macro metadata(panel) %}
+<section class="panel">
+  <div class="section-title" data-help="inventory/identity#metadata">Metadata</div>
+  {% call m::pager(panel.pager) %}{% endcall %}
+  <table class="data-table">
+    <thead><tr><th>Key</th><th>Value</th>{% if panel.shows_target_visible %}<th>Visible to device</th>{% endif %}<th></th></tr></thead>
+    <tbody>
+      {%- if panel.rows.is_empty() %}
+      <tr><td class="muted" colspan="4">No metadata yet.</td></tr>
+      {%- else %}
+      {%- for row in panel.rows.iter() %}
+      <tr>
+        <td><code>{{ row.key }}</code></td>
+        <td>{{ row.value }}</td>
+        {%- if panel.shows_target_visible %}<td>{% if row.target_visible %}yes{% else %}no{% endif %}</td>{% endif %}
+        <td>
+          {#- The key travels in the body, never in the path: keys hold
+              slashes, percent signs and spaces. -#}
+          <form method="post" action="{{ panel.delete_action }}" data-confirm="Delete metadata {{ row.key }}?"><input type="hidden" name="key" value="{{ row.key }}"><button class="danger-button" type="submit">Delete</button></form>
+        </td>
+      </tr>
+      {%- endfor %}
+      {%- endif %}
+    </tbody>
+  </table>
+  {#- The server upserts, so one form both adds and edits. -#}
+  <form class="inline-form" method="post" action="{{ panel.save_action }}" data-help="inventory/identity#metadata">
+    <input name="key" placeholder="key" required>
+    <input name="value" placeholder="value">
+    {%- if panel.shows_target_visible %}
+    <label class="inline-check" data-help="inventory/identity#visible-to-device"><input type="checkbox" name="targetVisible"> visible to device</label>
+    {%- endif %}
+    <button class="primary-button" type="submit">Save</button>
+  </form>
+</section>
+{% endmacro %}
+
+{% macro software_module(panel) %}
+<section class="panel"><div class="section-title" data-help="repository/artifacts#artifacts">Artifacts</div>{% call artifacts(panel.artifacts) %}{% endcall %}</section>
+{% call metadata(panel.metadata) %}{% endcall %}
+{% endmacro %}
+
+{% macro target_type(panel) %}
+<section class="panel">
+  <div class="section-title" data-help="inventory/target-types#compatible-types">Compatible distribution set types</div>
+  {% call m::chips(panel.compatible) %}{% endcall %}
+  <form class="inline-form" method="post" action="{{ panel.add_action }}">{% call m::picker(panel.picker) %}{% endcall %}<button class="primary-button" type="submit">Add type</button></form>
+</section>
+{% endmacro %}
+
+{#- Auto-assignment: the standing rule that hands a set to every device the
+    filter matches from now on. -#}
+{% macro auto_assign(panel) %}
+<section class="panel">
+  <div class="section-title" data-help="deployment/auto-assignment#auto-assignment">Auto-assigned distribution set</div>
+  {%- match panel.current %}
+  {%- when Some with (current) %}
+  <table class="property-table"><tbody>
+    <tr><th>Distribution set</th><td><a href="{{ current.href }}">{{ current.label }}</a></td></tr>
+    <tr><th>Action type</th><td>{{ current.action_type }}</td></tr>
+    <tr><th>Weight</th><td>{{ current.weight }}</td></tr>
+    <tr><th>Confirmation required</th><td>{% if current.confirmation_required %}yes{% else %}no{% endif %}</td></tr>
+  </tbody></table>
+  <form class="inline-form" method="post" action="{{ panel.clear_action }}" data-confirm="Stop auto-assigning {{ current.label }}?"><button class="danger-button" type="submit">Clear</button></form>
+  {%- when None %}
+  <div class="empty-cell">Nothing is auto-assigned: devices matching this filter are left alone.</div>
+  {%- endmatch %}
+  <form class="inline-form" method="post" action="{{ panel.set_action }}">
+    {% call m::picker(panel.picker) %}{% endcall %}
+    <select name="type" aria-label="Action type" data-help="deployment/action-types#action-types"><option value="forced">forced</option><option value="soft">soft</option><option value="downloadonly">download only</option></select>
+    <input name="weight" type="number" min="0" max="1000" placeholder="weight" data-help="deployment/assignment#weight">
+    <label class="inline-check" data-help="deployment/confirmation#confirmation-required"><input type="checkbox" name="confirmationRequired"> confirmation required</label>
+    <button class="primary-button" type="submit">Set</button>
+  </form>
+</section>
+{% endmacro %}
+
+{#- A group is a free-text path (`eu/west`), so the field suggests existing
+    ones but accepts anything typed. -#}
+{% macro group(panel) %}
+<div class="section-title" data-help="inventory/target-groups#groups">Group</div>
+<div class="token-row">
+  {%- if panel.current.len() > 0 %}
+  <a href="{{ panel.current_href }}"><code>{{ panel.current }}</code></a>
+  <form class="inline-form" method="post" action="{{ panel.clear_action }}" data-confirm="Remove {{ panel.current }} from this device?"><button class="ghost-button" type="submit">Clear</button></form>
+  {%- else %}
+  <span class="muted">No group.</span>
+  {%- endif %}
+</div>
+<form class="inline-form" method="post" action="{{ panel.set_action }}">{% call m::picker(panel.picker) %}{% endcall %}<button class="primary-button" type="submit">Set group</button></form>
+{% endmacro %}

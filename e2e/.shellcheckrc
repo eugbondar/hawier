@@ -1,0 +1,4 @@
+# The harness passes functions to wait_for and trap by name, which shellcheck
+# cannot follow: every such function reads as "unreachable".
+disable=SC2317
+external-sources=true

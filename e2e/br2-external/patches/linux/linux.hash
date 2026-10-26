@@ -1,0 +1,10 @@
+# Buildroot 2026.02.3 keeps this hash in linux/from-6.17/linux.hash, where its
+# lookup (linux/<version>/ or linux/) never finds it, so the "latest" kernel
+# would download unchecked. Pinned here, through BR2_GLOBAL_PATCH_DIR, from
+# the same source: https://www.kernel.org/pub/linux/kernel/v6.x/sha256sums.asc
+sha256  cde8bf6739be4a0777fedbbba5330b8188c55680c45a922a4dfa289cbec6f185  linux-6.19.14.tar.xz
+
+# Licenses hashes
+sha256  fb5a425bd3b3cd6071a3a9aff9909a859e7c1158d54d32e07658398cd67eb6a0  COPYING
+sha256  8780e78a1a737e127f25a65f6d95269bffd36158dc261114de7859b490bfc5aa  LICENSES/preferred/GPL-2.0
+sha256  8e378ab93586eb55135d3bc119cce787f7324f48394777d00c34fa3d0be3303f  LICENSES/exceptions/Linux-syscall-note

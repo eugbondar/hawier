@@ -1,0 +1,85 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/server",
+    "apps/ext-authz",
+    "apps/ext-console",
+    "apps/ext-fs",
+    "apps/ext-retention",
+    "apps/ext-rollout-bucket",
+    "apps/ext-rollout-classic",
+    "apps/ext-s3",
+    "apps/ext-webhook",
+    "apps/ui",
+    "apps/client",
+    "libs/api",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "EPL-2.0"
+
+[workspace.dependencies]
+hawier-api = { path = "libs/api" }
+hawier-server = { path = "apps/server" }
+hawier-client = { path = "apps/client" }
+
+anyhow = "1"
+askama = "0.16"
+axum = { version = "0.8", features = ["macros", "multipart"] }
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive", "env"] }
+cron = "0.15"
+futures = "0.3"
+hex = "0.4"
+http = "1"
+md-5 = "0.10"
+mime_guess = "2"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_urlencoded = "0.7"
+sha1 = "0.10"
+sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "macros", "json"] }
+subtle = "2"
+thiserror = "2"
+time = "0.3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "fs", "io-util", "time", "sync", "process"] }
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["io"] }
+tower = { version = "0.5", features = ["limit"] }
+wasmtime = { version = "48", default-features = false, features = ["cranelift", "runtime", "std", "anyhow"] }
+wasmtime-wasi = "48"
+tower-http = { version = "0.6", features = ["cors", "trace", "limit"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[profile.dev]
+# Full DWARF is 76% of a debug binary here — 357 MB of the 472 MB of
+# it_ui_audit — and every linked executable carries its own copy, so eighteen
+# integration tests meant 6.4 GB of duplicated type information per build.
+# Line tables keep the part anyone actually reads: file and line in a
+# backtrace. Panic messages keep theirs either way (`#[track_caller]` puts
+# them in the binary as data, not in DWARF). What this gives up is inspecting
+# variables in gdb; for one such session raise a single crate on the side
+# (`[profile.dev.package.sqlx] debug = 2`) and do not commit it.
+#
+# `debug-assertions` is deliberately left alone: `make load` refuses to record
+# against a node that reports them, and /settings draws its `debug` pill from
+# the same probe.
+debug = "line-tables-only"
+
+[profile.release]
+lto = "thin"
+# Debug information is the bulk of a binary's bytes, and a release image
+# carries every one of them over the wire to each host it is deployed to.
+# "debuginfo" keeps the symbol table, so a backtrace still names functions and
+# `#[track_caller]` still carries panic messages as data in the binary; what
+# goes is file:line in backtraces and inspecting variables in gdb. `make load`
+# measures the same binary and cannot tell the difference.
+strip = "debuginfo"

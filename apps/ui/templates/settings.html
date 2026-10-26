@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block content %}
+<section class="panel">
+  <div class="section-title" data-help="console/settings#system-settings">System Settings</div>
+  <table class="property-table"><tbody>
+    <tr><th>Tenant</th><td>{{ tenant }}</td></tr>
+    <tr><th>User</th><td>{{ username }}</td></tr>
+    <tr><th>hawier Management URL</th><td>{{ mgmt_url }}</td></tr>
+    <tr><th>hawier state API</th><td>{{ state_api }}</td></tr>
+  </tbody></table>
+</section>
+<section class="panel">
+  {#- One build string per component: a mismatch after a deploy is visible
+      here instead of being guessed from behaviour. -#}
+  <div class="section-title" data-help="console/settings#build">Build</div>
+  <table class="property-table"><tbody>
+    <tr><th>Console</th><td><code class="build-version">{{ console_build }}</code>{% if console_profile.len() > 0 %} <span class="status-pill attention" data-help="console/settings#build">{{ console_profile }}</span>{% endif %}</td></tr>
+    <tr><th>Server</th><td><code class="build-version">{{ server_build }}</code>{% if server_profile.len() > 0 %} <span class="status-pill attention" data-help="console/settings#build">{{ server_profile }}</span>{% endif %}{% if server_node.len() > 0 %} <span class="muted">node {{ server_node }} / {{ server_role }}</span>{% endif %}</td></tr>
+  </tbody></table>
+</section>
+{#- Node-scoped panels sit together, before the tenant-scoped one: this
+    page describes two different things and used to say which only in
+    passing. Each names the node it is about — the console asks exactly one,
+    and a reader must not take it for the fleet. -#}
+<section class="panel">
+  <div class="section-title" data-help="admin/extensions#extensions">Extensions{% if extensions.available %} on {{ extensions.node }}{% endif %}</div>
+  {%- if !extensions.available %}
+  <div class="callout danger">{{ extensions.error }}</div>
+  {%- else %}
+  <table class="property-table"><tbody>
+    {%- for row in extensions.rows %}
+    <tr>
+      <th>{{ row.label }}<br><code class="muted">{{ row.points }}</code></th>
+      <td>
+        {%- if row.configured %}
+        {{ row.module }} <code class="module-version">{{ row.version }}</code>
+        {%- for site in row.sites %} <span class="status-pill">{{ site }}</span>{% endfor %}
+        {%- for capability in row.capabilities %} <span class="status-pill attention">{{ capability }}</span>{% endfor %}
+        {#- The variable is named whether or not the slot is filled: an
+            operator changing which module loads needs it either way, and it
+            is not in the parameters panel — choosing a module is a
+            deployment decision, not a parameter. -#}
+        <div class="muted">{{ row.path }} — <code>{{ row.env_var }}</code></div>
+        {%- else %}
+        <span class="muted">not configured</span> — {{ row.absence }}
+        <div class="muted">set <code>{{ row.env_var }}</code> to a module path</div>
+        {%- endif %}
+      </td>
+      <td>
+        {%- if row.configured %}
+        {#- Two facts, side by side: the module declares one deadline and the
+            node has only ever applied its own. -#}
+        <span class="muted">{{ row.deadline }}, node enforces {{ extensions.enforced_deadline }}</span>
+        {%- endif %}
+      </td>
+    </tr>
+    {%- endfor %}
+  </tbody></table>
+  {%- endif %}
+</section>
+<section class="panel">
+  <div class="section-title" data-help="admin/extensions#parameters">Extension parameters{% if extensions.available %} on {{ extensions.node }}{% endif %}</div>
+  {%- if !extensions.available %}
+  <div class="callout danger">{{ extensions.error }}</div>
+  {%- else %}
+  {%- if extensions.file_note.len() > 0 %}
+  <div class="callout">{{ extensions.file_note }}</div>
+  {%- endif %}
+  {%- if extensions.drift_note.len() > 0 %}
+  {#- Not `callout danger`: nothing is broken, something is pending. -#}
+  <div class="callout">{{ extensions.drift_note }}</div>
+  {%- endif %}
+  <table class="property-table"><tbody>
+    {%- for row in extensions.params %}
+    <tr>
+      <th><code>{{ row.name }}</code>
+        <span class="status-pill">{{ row.origin }}</span>
+        {%- if row.changed %} <span class="status-pill attention">changed</span>{% endif %}
+      </th>
+      <td>
+        {%- if row.editable %}
+        <form class="inline-form" method="post" action="/settings/extensions">
+          <input type="hidden" name="name" value="{{ row.name }}">
+          {%- if row.secret %}
+          {#- No value attribute, ever: a credential is settable and never
+              readable, and an empty submit means "keep". -#}
+          <input name="value" type="password" placeholder="unchanged" autocomplete="off">
+          {%- else %}
+          <input name="value" value="{{ row.value_text }}">
+          {%- endif %}
+          <button class="primary-button" type="submit">Save</button>
+        </form>
+        {%- else %}
+        {% call m::cell(row.value) %}{% endcall %}
+        {%- if row.note.len() > 0 %} <span class="muted">{{ row.note }}</span>{% endif %}
+        {%- endif %}
+      </td>
+      <td>
+        {%- if row.removable %}
+        <form class="inline-form" method="post" action="/settings/extensions/delete" data-confirm="Remove {{ row.name }} from the parameters file?"><input type="hidden" name="name" value="{{ row.name }}"><button class="ghost-button" type="submit">Remove</button></form>
+        {%- endif %}
+      </td>
+    </tr>
+    {%- endfor %}
+    {%- if extensions.params.is_empty() %}
+    <tr><td class="muted">No extension parameters are set on this node.</td></tr>
+    {%- endif %}
+    {%- if extensions.writable && extensions.file_configured %}
+    <tr>
+      <th><span class="muted">add</span></th>
+      <td>
+        <form class="inline-form" method="post" action="/settings/extensions">
+          <input name="name" placeholder="HAWIER_EXT_..." pattern="HAWIER_EXT_[A-Z0-9_]+" required>
+          <input name="value" placeholder="value" required>
+          <button class="primary-button" type="submit">Add</button>
+        </form>
+      </td>
+      <td></td>
+    </tr>
+    {%- endif %}
+  </tbody></table>
+  {%- endif %}
+</section>
+<section class="panel">
+  <div class="section-title" data-help="admin/settings#tenant-configuration">Tenant configuration</div>
+  <table class="property-table"><tbody>
+    {%- for row in configs %}
+    <tr>
+      <th data-help="admin/settings#{{ row.key }}"><code>{{ row.key }}</code>{% if row.global %} <span class="muted">(default)</span>{% endif %}</th>
+      <td>
+        <form class="inline-form" method="post" action="/settings/config" data-help="admin/settings#{{ row.key }}">
+          <input type="hidden" name="key" value="{{ row.key }}">
+          <input name="value" value="{{ row.value }}">
+          <button class="primary-button" type="submit">Save</button>
+        </form>
+      </td>
+      <td>
+        {%- if !row.global %}
+        <form class="inline-form" method="post" action="/settings/config/delete" data-confirm="Reset {{ row.key }} to default?" data-help="admin/settings#defaults"><input type="hidden" name="key" value="{{ row.key }}"><button class="ghost-button" type="submit">Reset</button></form>
+        {%- endif %}
+      </td>
+    </tr>
+    {%- endfor %}
+  </tbody></table>
+</section>
+{% endblock %}

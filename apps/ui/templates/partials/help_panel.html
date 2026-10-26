@@ -1,0 +1,14 @@
+{% import "help_blocks.html" as b %}
+<div class="help-panel-head">
+  <span class="help-panel-topic">{{ topic_title }}</span>
+  <button type="button" class="ghost-button" data-help-close title="Close">{{ crate::view::icon("close")|safe }}</button>
+</div>
+{%- if found %}
+<div class="help-panel-title">{{ title }}</div>
+<div class="doc help-panel-body">{% call b::blocks(summary) %}{% endcall %}</div>
+<a class="primary-button" href="{{ article_href }}">Open the full article</a>
+{%- else %}
+<div class="help-panel-body"><div class="empty-cell">No help is written for this control yet.</div></div>
+<a class="primary-button" href="/help">Open the manual</a>
+{%- endif %}
+{% call b::disclaimer() %}{% endcall %}

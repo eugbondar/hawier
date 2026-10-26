@@ -1,0 +1,65 @@
+#!/bin/sh
+#
+# The board's identity and hardware revision come from QEMU firmware
+# configuration, which plays the part of an EEPROM: read-only, per unit, and
+# outside the image. The image carries neither. Without both, the updater
+# does not start (spec: reference-device-image).
+
+FW=/sys/firmware/qemu_fw_cfg/by_name/opt/org.hawier
+BOARD=hawier-qemu
+
+fail() {
+	echo "hawier: $1 — the updater will not start" > /dev/console
+	rm -f /run/swupdate.cfg
+	exit 0
+}
+
+start() {
+	mkdir -p /run/hawier
+	rm -f /run/swupdate.cfg /run/hwrevision
+
+	[ -r "$FW/hwrevision/raw" ] || fail "hardware revision is missing (fw_cfg opt/org.hawier/hwrevision)"
+	revision=$(tr -d '\n' < "$FW/hwrevision/raw")
+	[ -n "$revision" ] || fail "hardware revision is empty"
+	echo "$BOARD $revision" > /run/hwrevision
+
+	[ -r "$FW/identity/raw" ] || fail "device identity is missing (fw_cfg opt/org.hawier/identity)"
+	cp "$FW/identity/raw" /run/hawier/identity
+	url='' tenant='' controller_id='' target_token=''
+	while IFS='=' read -r key value; do
+		case "$key" in
+			url) url=$value ;;
+			tenant) tenant=$value ;;
+			controller_id) controller_id=$value ;;
+			target_token) target_token=$value ;;
+		esac
+	done < /run/hawier/identity
+	for item in url tenant controller_id target_token; do
+		eval "[ -n \"\$$item\" ]" || fail "device identity has no $item"
+	done
+
+	slot=$(sed -n 's/.*hawier\.slot=\([ab]\).*/\1/p' /proc/cmdline)
+	case "$slot" in
+		a) inactive=b ;;
+		b) inactive=a ;;
+		*) fail "the bootloader did not say which slot is running" ;;
+	esac
+	version=$(cat /etc/hawier-version 2>/dev/null)
+
+	sed -e "s|@REVISION@|$revision|" -e "s|@SLOT@|$slot|" \
+	    -e "s|@INACTIVE@|$inactive|" -e "s|@VERSION@|$version|" \
+	    -e "s|@URL@|$url|" -e "s|@TENANT@|$tenant|" \
+	    -e "s|@CONTROLLER_ID@|$controller_id|" -e "s|@TARGET_TOKEN@|$target_token|" \
+	    /etc/swupdate/swupdate.cfg.in > /run/swupdate.cfg
+
+	# The variable store must exist before SWUpdate opens it.
+	[ -e /data/swupdate.env ] || dd if=/dev/zero of=/data/swupdate.env bs=1k count=16 2>/dev/null
+
+	echo "hawier: $BOARD $revision, slot $slot, version $version, controller $controller_id" > /dev/console
+}
+
+case "$1" in
+	start) start ;;
+	stop) ;;
+	*) echo "Usage: $0 {start|stop}"; exit 1 ;;
+esac

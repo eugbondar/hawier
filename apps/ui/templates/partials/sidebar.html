@@ -1,0 +1,40 @@
+<aside class="sidebar">
+  <nav class="nav-tree">
+    <a class="nav-link" href="/" title="Overview" data-help="start/console#the-overview">{{ crate::view::icon("overview")|safe }}<span class="nav-text">Overview</span></a>
+    {%- for group in layout.groups %}
+    <details class="nav-section" data-help="{{ group.help }}" data-tree-key="group:{{ group.key }}"{% if group.open %} open{% endif %}{% if group.active %} data-active="true"{% endif %}>
+      <summary>{{ crate::view::icon("chevron")|safe }}<span>{{ group.label }}</span></summary>
+      {%- if group.is_admin %}
+      <a class="nav-link" href="/settings" title="System Settings" data-help="console/settings#system-settings">{{ crate::view::icon("settings")|safe }}<span class="nav-text">System Settings</span></a>
+      {%- endif %}
+      {%- for resource in group.resources %}
+      <details class="resource-node" data-help="{{ resource.help }}" data-tree-key="resource:{{ resource.id }}"{% if resource.active %} open data-active="true"{% endif %}>
+        <summary>{{ crate::view::icon("chevron")|safe }}<a class="resource-link{% if resource.active %} active{% endif %}" href="/{{ resource.id }}" title="{{ resource.label }}">{{ crate::view::icon(resource.icon)|safe }}<span class="nav-text">{{ resource.label }}</span></a></summary>
+        <div class="view-tree">
+          {%- for view in resource.views %}
+          <a class="view-link{% if view.active %} active{% endif %}" href="{{ view.href }}" data-help="{{ view.help }}">{{ crate::view::icon("view")|safe }}{{ view.label }}</a>
+          {%- endfor %}
+          {%- if !resource.saved.is_empty() %}
+          <div class="view-tree-split"></div>
+          {%- endif %}
+          {%- for view in resource.saved %}
+          <span class="user-view-row list-row" data-help="console/views#saved-views"><a class="view-link list-row-label{% if view.active %} active{% endif %}" href="{{ view.href }}">{{ crate::view::icon("user-view")|safe }}{{ view.label }}</a><span class="list-row-actions"><a title="Edit view" href="{{ view.edit_href }}">{{ crate::view::icon("pencil")|safe }}</a></span></span>
+          {%- endfor %}
+        </div>
+      </details>
+      {%- endfor %}
+    </details>
+    {%- endfor %}
+    <a class="nav-link" href="/help" title="Help" data-help="console/help#the-manual">{{ crate::view::icon("help")|safe }}<span class="nav-text">Help</span></a>
+  </nav>
+  {#- Who you are and how to leave belong to the navigation column. -#}
+  <div class="sidebar-footer">
+    {%- match layout.session %}
+    {%- when Some with (chip) %}
+    <span class="session-chip" data-help="admin/roles#who-you-are" title="{{ chip.tenant }} / {{ chip.username }}">{{ crate::view::icon("user-view")|safe }}<span class="nav-text">{{ chip.tenant }} / {{ chip.username }}</span></span>
+    <form method="post" action="/logout" data-help="admin/roles#who-you-are"><button class="ghost-button" type="submit" title="Logout">{{ crate::view::icon("logout")|safe }}<span class="nav-text">Logout</span></button></form>
+    {%- when None %}
+    <a class="ghost-button" href="/login">Login</a>
+    {%- endmatch %}
+  </div>
+</aside>

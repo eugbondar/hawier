@@ -1,0 +1,62 @@
+[package]
+name = "hawier-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "hawier_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hawier"
+path = "src/main.rs"
+
+[dependencies]
+hawier-api.workspace = true
+
+anyhow.workspace = true
+axum.workspace = true
+base64.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+cron.workspace = true
+futures.workspace = true
+hex.workspace = true
+http.workspace = true
+md-5.workspace = true
+rand.workspace = true
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+hawier-client.workspace = true
+reqwest = { workspace = true, features = ["multipart"] }
+
+[[test]]
+# One binary for the whole suite. Cargo makes an executable per file directly
+# under tests/, and each of these links the full wasmtime stack: fifteen files
+# meant fifteen ~440 MB copies of the same dependency closure, per build
+# configuration, for good (cargo never collects the old ones).
+name = "it"
+path = "tests/it/main.rs"
+# Every test in here is #[ignore]d and wants Postgres, so a plain
+# `cargo test` must not even link it. `--test it` still builds it on
+# demand; `make lint` names it explicitly, because --all-targets honours
+# this flag and would otherwise stop checking the suite entirely.
+test = false

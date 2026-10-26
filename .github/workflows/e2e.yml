@@ -1,0 +1,95 @@
+# hawier against a real update client (spec: device-e2e).
+#
+# The workflow only prepares the runner and calls make: `make e2e-image` and
+# `make e2e` are the whole build and test, exactly as on a laptop. Actions are
+# pinned by commit; the tag is in the comment.
+name: e2e
+
+on:
+  workflow_dispatch:
+  push:
+    paths: &paths
+      - "e2e/**"
+      - "apps/server/src/ddi/**"
+      - "apps/server/src/deploy_logic.rs"
+      - "apps/server/src/rollout*.rs"
+      - "apps/server/src/mgmt/targets.rs"
+      - "apps/server/src/mgmt/distribution_sets.rs"
+      - "libs/api/**"
+      - ".github/workflows/e2e.yml"
+  pull_request:
+    paths: *paths
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      # The runner image ships podman next to docker, and discovery prefers
+      # podman; its compose there would not be the runner's docker compose.
+      # Named explicitly, the way the build rules allow an override.
+      ENGINE: docker
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Hosted runners have KVM, but /dev/kvm is not open to the runner user.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install QEMU and shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils shellcheck
+
+      - name: Buildroot pin
+        id: pin
+        run: echo "version=$(sed -n 's/^BR_VERSION := //p' e2e/e2e.mk)" >> "$GITHUB_OUTPUT"
+
+      # Downloads and the compiler cache are what a cold Buildroot build pays
+      # for; the output tree itself is rebuilt from them.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            target/e2e/dl
+            target/e2e/ccache
+          key: e2e-br-${{ steps.pin.outputs.version }}-${{ hashFiles('e2e/**') }}
+          restore-keys: e2e-br-${{ steps.pin.outputs.version }}-
+
+      # Cargo's side, named directory by directory: a whole-target cache would
+      # take target/e2e (gigabytes of Buildroot output) along with it.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/debug
+            target/wasm32-wasip1
+          key: cargo-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+
+      - name: Reference image
+        run: make e2e-image
+
+      - name: End to end
+        run: make e2e
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: e2e-report
+          path: target/e2e/report.txt
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: e2e-logs
+          path: target/e2e/logs/
+          if-no-files-found: ignore

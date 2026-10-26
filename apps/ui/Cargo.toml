@@ -1,0 +1,50 @@
+[package]
+name = "hawier-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "hawier_ui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hawier-ui"
+path = "src/main.rs"
+
+[dependencies]
+hawier-api.workspace = true
+
+anyhow.workspace = true
+askama.workspace = true
+axum.workspace = true
+base64.workspace = true
+http.workspace = true
+futures.workspace = true
+mime_guess.workspace = true
+reqwest = { workspace = true, features = ["multipart"] }
+serde.workspace = true
+serde_json.workspace = true
+serde_urlencoded.workspace = true
+time.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+hawier-server.workspace = true
+sqlx.workspace = true
+
+[[test]]
+# One binary for the whole suite; see apps/server/Cargo.toml for why. These
+# are the expensive ones: the dev-dependency on hawier-server drags the wasm
+# runtime into every console test too.
+name = "it"
+path = "tests/it/main.rs"
+# Every test in here is #[ignore]d and wants Postgres, so a plain
+# `cargo test` must not even link it. `--test it` still builds it on
+# demand; `make lint` names it explicitly, because --all-targets honours
+# this flag and would otherwise stop checking the suite entirely.
+test = false

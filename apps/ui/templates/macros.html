@@ -1,0 +1,64 @@
+{#- Reusable fragments. Every page composes these; no markup lives in Rust. -#}
+
+{% macro cell(c) %}
+{%- match c -%}
+{%- when Cell::Text with (t) -%}{{ t }}
+{%- when Cell::Muted with (t) -%}<span class="muted">{{ t }}</span>
+{%- when Cell::Badge { class, text, help } -%}<span class="status-badge {{ class }}" data-help="{{ help }}">{{ text }}</span>
+{%- when Cell::Time { epoch, human } -%}<time data-epoch="{{ epoch }}" title="{{ epoch }}" data-help="reference/time#reading-a-timestamp">{{ human }}</time>
+{%- when Cell::TimeFull { epoch, human } -%}<time data-epoch="{{ epoch }}" title="{{ epoch }}" data-help="reference/time#reading-a-timestamp">{{ human }}</time> <code class="muted">({{ epoch }})</code>
+{%- when Cell::Overdue { epoch, human } -%}<span class="status-pill error" data-help="glossary#overdue">overdue</span> <time data-epoch="{{ epoch }}" title="{{ epoch }}">{{ human }}</time>
+{%- when Cell::Link { href, label } -%}<a href="{{ href }}" onclick="event.stopPropagation()">{{ label }}</a>
+{%- endmatch -%}
+{% endmacro %}
+
+{#- Row counter and paging controls — always above the table. -#}
+{% macro pager(p) %}
+<div class="pager">
+  <span class="pager-summary">{{ p.first_row }}–{{ p.last_row }} of {{ p.total }}</span>
+  <span class="pager-controls">
+    {%- if p.has_prev -%}
+    <a class="ghost-button" href="{{ p.first_href }}">«</a><a class="ghost-button" href="{{ p.prev_href }}">‹</a>
+    {%- else -%}
+    <span class="ghost-button disabled">«</span><span class="ghost-button disabled">‹</span>
+    {%- endif -%}
+    {%- match p.jump -%}
+    {%- when Some with (j) -%}
+    <form class="pager-jump" method="get" action="{{ j.action }}">
+      {%- for f in j.fields.iter() %}<input type="hidden" name="{{ f.name }}" value="{{ f.value }}">{% endfor -%}
+      <input name="page" type="number" min="1" max="{{ p.last_page }}" value="{{ p.page }}" aria-label="Page"><span class="muted">/ {{ p.last_page }}</span>
+    </form>
+    {%- when None -%}
+    <span class="muted">{{ p.page }} / {{ p.last_page }}</span>
+    {%- endmatch -%}
+    {%- if p.has_next -%}
+    <a class="ghost-button" href="{{ p.next_href }}">›</a><a class="ghost-button" href="{{ p.last_href }}">»</a>
+    {%- else -%}
+    <span class="ghost-button disabled">›</span><span class="ghost-button disabled">»</span>
+    {%- endif -%}
+  </span>
+</div>
+{% endmacro %}
+
+{#- Searchable picker: replaces every <select> that a server list filled.
+    A thousand distribution sets never fit in a dropdown. -#}
+{% macro picker(p) %}
+<span class="picker" data-help="console/lists#pickers" data-picker data-picker-resource="{{ p.resource }}"{% if p.free %} data-picker-free{% endif %}>
+  <input type="text" class="picker-input" data-picker-input placeholder="{{ p.placeholder }}" autocomplete="off" value="{{ p.label }}" aria-label="{{ p.placeholder }}">
+  <input type="hidden" name="{{ p.field }}" data-picker-value value="{{ p.value }}"{% if p.form_id.len() > 0 %} form="{{ p.form_id }}"{% endif %}>
+  <span class="picker-results" data-picker-results hidden></span>
+</span>
+{% endmacro %}
+
+{#- Tag chips with a remove control, shared by targets and distribution sets. -#}
+{% macro chips(rows) %}
+<div class="tag-row" data-help="inventory/target-tags#tags">
+  {%- if rows.is_empty() -%}
+  <span class="muted">None.</span>
+  {%- else -%}
+  {%- for chip in rows.iter() -%}
+  <span class="tag-chip list-row"{% if chip.colour.len() > 0 %} style="border-color:{{ chip.colour }}"{% endif %}><span class="list-row-label">{{ chip.label }}</span><span class="list-row-actions"><form method="post" action="{{ chip.remove_action }}" data-confirm="Remove {{ chip.label }}?"><button class="chip-remove" type="submit" title="Remove">×</button></form></span></span>
+  {%- endfor -%}
+  {%- endif -%}
+</div>
+{% endmacro %}

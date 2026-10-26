@@ -1,0 +1,58 @@
+# Source of linux.config. After editing, regenerate it in the kernel tree
+# Buildroot unpacked (target/e2e/br-output/build/linux-<version>), inside the
+# builder container:
+#   make allnoconfig KCONFIG_ALLCONFIG=<this file> && make savedefconfig
+# and copy `defconfig` over linux.config. Everything not named here is off —
+# that is what keeps the kernel a couple of minutes to build.
+CONFIG_64BIT=y
+# The kernel sits inside a SquashFS slot that cannot compress it again.
+CONFIG_KERNEL_XZ=y
+CONFIG_PRINTK=y
+CONFIG_BUG=y
+CONFIG_MULTIUSER=y
+CONFIG_FUTEX=y
+CONFIG_EPOLL=y
+CONFIG_SIGNALFD=y
+CONFIG_TIMERFD=y
+CONFIG_EVENTFD=y
+CONFIG_SHMEM=y
+CONFIG_POSIX_TIMERS=y
+CONFIG_FILE_LOCKING=y
+CONFIG_BINFMT_ELF=y
+CONFIG_BINFMT_SCRIPT=y
+# Guest niceties: kvm-clock instead of TSC calibration, and ACPI so PCI
+# interrupt routing for virtio works the ordinary way.
+CONFIG_HYPERVISOR_GUEST=y
+CONFIG_PARAVIRT=y
+CONFIG_KVM_GUEST=y
+CONFIG_ACPI=y
+CONFIG_PCI=y
+CONFIG_VIRTIO_MENU=y
+CONFIG_VIRTIO_PCI=y
+CONFIG_BLOCK=y
+CONFIG_BLK_DEV=y
+CONFIG_VIRTIO_BLK=y
+CONFIG_MSDOS_PARTITION=y
+CONFIG_NET=y
+CONFIG_PACKET=y
+CONFIG_UNIX=y
+CONFIG_INET=y
+CONFIG_NETDEVICES=y
+CONFIG_NET_CORE=y
+CONFIG_VIRTIO_NET=y
+CONFIG_TTY=y
+CONFIG_SERIAL_8250=y
+CONFIG_SERIAL_8250_CONSOLE=y
+CONFIG_PROC_FS=y
+CONFIG_PROC_SYSCTL=y
+CONFIG_SYSFS=y
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+CONFIG_TMPFS=y
+CONFIG_MISC_FILESYSTEMS=y
+CONFIG_SQUASHFS=y
+CONFIG_SQUASHFS_XZ=y
+CONFIG_EXT4_FS=y
+CONFIG_EXT4_USE_FOR_EXT2=y
+# The board "EEPROM": identity and hardware revision per boot.
+CONFIG_FW_CFG_SYSFS=y

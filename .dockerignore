@@ -1,0 +1,14 @@
+# The build context is uploaded to the daemon in full before anything is
+# built, so anything here that the image does not need is pure wall-clock.
+#
+# `target` is the one that mattered: this file used to name `backend/target`,
+# a path from an older layout that has not existed for a long time, so the
+# real one was sent every time — 47 GB of build cache, on every `make scale`,
+# before a single line was compiled.
+.git
+target
+deploy
+*.log
+
+# Local benchmark history: read by a human, never by the build.
+bench

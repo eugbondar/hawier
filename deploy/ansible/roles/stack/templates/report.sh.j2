@@ -1,0 +1,66 @@
+#!/bin/sh
+# {{ ansible_managed }}
+#
+# The whole state of the stack, as plain text on stdout. The play writes what
+# this prints to a file on the machine that ran make, so there is one thing to
+# read and one thing to paste.
+#
+# Everything here asks the ENGINE, never compose. podman-compose answered
+# `ps -a` with nothing at all and returned one service's log under another
+# service's name, which is worse than no diagnostics: it points at the wrong
+# container. The engine's own ps and logs cannot mis-map, and the container
+# names are matched for both layouts — docker compose writes
+# <project>-<service>-1, podman-compose <project>_<service>_1.
+set -u
+
+ENGINE='{{ hawier_engine }}'
+PROJECT='{{ hawier_project }}'
+TAIL='{{ hawier_diag_log_lines }}'
+
+# podman-compose prefixes its output with an underlined banner, and both
+# engines colour log levels; none of that belongs in a file someone pastes.
+strip_ansi() { sed -e 's/\x1b\[[0-9;]*[A-Za-z]//g' -e 's/\x1b//g'; }
+
+# The name filter is a Go regexp, not a POSIX one: `[0-9]+`, and `\+` there is
+# a literal plus that matches nothing.
+cid_of() {
+    "$ENGINE" ps -a --filter "name=^${PROJECT}[-_]$1[-_][0-9]+$" \
+        --format '{% raw %}{{.ID}}{% endraw %}' 2>/dev/null | head -1
+}
+
+echo "hawier on $(hostname) at $(date -u '+%Y-%m-%d %H:%M:%SZ')"
+echo "engine: $ENGINE     project: $PROJECT     dir: {{ hawier_dir }}"
+echo
+
+echo "=== containers ==="
+"$ENGINE" ps -a --filter "name=$PROJECT" \
+    --format '{% raw %}{{.Names}}\t{{.Status}}\t{{.Image}}{% endraw %}' 2>&1 | strip_ansi
+echo
+
+echo "=== state ==="
+for svc in postgres hawier-control hawier-ui{{ ' caddy' if hawier_tls | bool else '' }}; do
+    cid=$(cid_of "$svc")
+    if [ -z "$cid" ]; then
+        printf '%-15s no container\n' "$svc"
+        continue
+    fi
+    # Each field on its own, so an engine that does not know one of them costs
+    # that field and not the line.
+    state=$("$ENGINE" inspect --format '{% raw %}{{.State.Status}}{% endraw %}' "$cid" 2>/dev/null || echo '?')
+    code=$("$ENGINE" inspect --format '{% raw %}{{.State.ExitCode}}{% endraw %}' "$cid" 2>/dev/null || echo '?')
+    count=$("$ENGINE" inspect --format '{% raw %}{{.RestartCount}}{% endraw %}' "$cid" 2>/dev/null || echo '?')
+    health=$("$ENGINE" inspect --format '{% raw %}{{.State.Health.Status}}{% endraw %}' "$cid" 2>/dev/null || echo '')
+    printf '%-15s %-11s exit=%-4s restarts=%-4s %s\n' "$svc" "$state" "$code" "$count" "$health"
+done
+echo
+
+for svc in postgres hawier-control hawier-ui{{ ' caddy' if hawier_tls | bool else '' }}; do
+    cid=$(cid_of "$svc")
+    echo "=== log: $svc (last $TAIL) ==="
+    if [ -z "$cid" ]; then
+        echo "(no container — it was never created)"
+    else
+        "$ENGINE" logs --tail "$TAIL" "$cid" 2>&1 | strip_ansi
+    fi
+    echo
+done

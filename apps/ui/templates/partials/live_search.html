@@ -1,0 +1,12 @@
+{%- if sections.is_empty() -%}
+<div class="live-search-state">No matches</div>
+{%- else -%}
+{%- for section in sections -%}
+{%- if !section.rows.is_empty() -%}
+<div class="live-search-group-title">{{ section.title }}</div>
+{%- for row in section.rows -%}
+<a href="{{ row.href }}">{{ row.label }}</a>
+{%- endfor -%}
+{%- endif -%}
+{%- endfor -%}
+{%- endif -%}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block content %}
+<section class="panel">
+  <div class="resource-toolbar"><strong data-help="deployment/rollout-groups#deploy-groups">Group {{ name }}</strong></div>
+  <table class="property-table"><tbody>
+    <tr><th data-help="deployment/rollouts#rollouts">Rollout</th><td><a href="{{ rollout_href }}">{{ rollout_id }}</a></td></tr>
+    <tr><th data-help="deployment/rollout-groups#group-states">Status</th><td><span class="status-pill {{ crate::view::status_class(status.as_str()) }}" data-help="glossary#{{ status }}">{{ status }}</span></td></tr>
+    <tr><th data-help="deployment/rollout-groups#deploy-groups">Targets</th><td>{{ total }}</td></tr>
+  </tbody></table>
+</section>
+<section class="panel">
+  <div class="section-title" data-help="deployment/rollout-groups#what-a-group-does">What this group did to each device</div>
+  {% call m::pager(pager) %}{% endcall %}
+  <table class="data-table">
+    <thead><tr><th>Controller</th><th>Detail</th><th>Type</th><th>State</th><th>Created</th></tr></thead>
+    <tbody>
+      {%- if rows.is_empty() %}
+      <tr><td class="muted" colspan="5">No actions in this group yet.</td></tr>
+      {%- else %}
+      {#- One action per group+target, so the row goes straight to its full
+          status history instead of a one-row intermediate list. -#}
+      {%- for row in rows %}
+      <tr data-href="{{ row.href }}">
+        <td><a href="{{ row.href }}">{{ row.controller_id }}</a></td>
+        <td><span class="status-pill {{ crate::view::status_class(row.detail.as_str()) }}" data-help="glossary#{{ row.detail }}">{{ row.detail }}</span></td>
+        <td>{{ row.kind }}</td>
+        <td>{{ row.status }}</td>
+        <td>{% call m::cell(row.created) %}{% endcall %}</td>
+      </tr>
+      {%- endfor %}
+      {%- endif %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

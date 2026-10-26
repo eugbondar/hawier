@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>{{ layout.title }}</title>
+<link rel="stylesheet" href="/assets/main.css">
+</head>
+<body data-help="{{ layout.help }}">
+<div class="app-shell">
+  {#- The collapse control comes first: it acts on the column below it. -#}
+  <header class="topbar">
+    <div class="topbar-nav">
+      <button type="button" class="ghost-button sidebar-toggle" data-sidebar-toggle title="Toggle navigation" aria-label="Toggle navigation">{{ crate::view::icon("burger")|safe }}</button>
+      <a class="brand-link" href="/"><span class="brand">Hawier</span></a>
+      {#- What's This?: arms help mode. Without scripting it is a plain link to
+          the manual, so the control never becomes a dead button. It sits by the
+          wordmark, not across the bar: asking about a field should not be a
+          journey. -#}
+      <a class="ghost-button help-toggle" href="/help" data-help-toggle aria-pressed="false"
+         title="What's This? (Shift+F1)" aria-label="Help"
+         data-help="console/help#whats-this">{{ crate::view::icon("help")|safe }}</a>
+    </div>
+    <form class="global-search" method="get" action="/search" data-search-form data-help="console/search#global-search">
+      <input name="q" value="{{ layout.search_query }}" placeholder="Search targets, rollouts, distribution sets, modules, tags" autocomplete="off">
+      <button type="submit">Search</button>
+      <div class="live-search-results" data-live-search-results hidden></div>
+    </form>
+  </header>
+  <div class="app-body">
+    {% include "partials/sidebar.html" %}
+    <main class="workspace"><div class="content">{% block content %}{% endblock %}</div></main>
+  </div>
+</div>
+<aside class="help-panel" data-help-panel hidden aria-label="Help"></aside>
+<script src="/assets/main.js"></script>
+</body>
+</html>

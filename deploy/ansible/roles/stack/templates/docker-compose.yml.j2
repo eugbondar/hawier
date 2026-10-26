@@ -1,0 +1,223 @@
+# {{ ansible_managed }}
+#
+# The deployed stack. Its sibling is deploy/docker-compose.yml, the local
+# stand — they describe the same three services and drift apart if only one is
+# edited. The differences here are all deliberate: images instead of `build:`
+# (there is nothing to compile on this host), no published database port, and
+# no health conditions in depends_on.
+#
+# The secrets are written straight in rather than referenced as ${...} from a
+# .env beside this file. Compose is supposed to read that file from the project
+# directory by itself, and the docker plugin does — but podman-compose does not
+# do it the same way, and the failure is silent: POSTGRES_PASSWORD arrives
+# empty, postgres exits 1 without ever initialising, and what the operator sees
+# is the node saying "connection refused". One fewer implementation difference
+# is worth more here than keeping the values in a second file; this one is 0600
+# for the same reason that one was.
+#
+# Pinned rather than derived from the directory name: the volumes are
+# {{ hawier_project }}_postgres-data and {{ hawier_project }}_ext-config, and if the
+# project name ever changed the next `up -d` would quietly create empty ones.
+name: {{ hawier_project }}
+
+services:
+  postgres:
+    image: {{ hawier_postgres_image }}
+    # This host does not download. Every image it runs was loaded over the ssh
+    # pipe from the machine that ran the deploy, and `never` is what keeps
+    # compose from quietly fetching a different copy of one when it cannot find
+    # it locally: a missing image has to be a loud failure, not a pull.
+    pull_policy: never
+    environment:
+      POSTGRES_DB: {{ hawier_db_name }}
+      POSTGRES_USER: {{ hawier_db_user }}
+      POSTGRES_PASSWORD: "{{ hawier_secrets.postgres_password }}"
+    # Passed as server flags rather than written into postgresql.conf: the conf
+    # lives in the data volume, so editing it would be a one-time effect on
+    # first init and silently ignored forever after.
+    command:
+      - postgres
+      - -c
+      - "shared_buffers={{ hawier_pg_shared_buffers }}"
+      - -c
+      - "max_connections={{ hawier_pg_max_connections }}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ hawier_db_user }} -d {{ hawier_db_name }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+{% if hawier_publish_postgres %}
+    ports:
+      - "{{ hawier_publish_postgres }}:5432"
+{% endif %}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # The stand leaves this out; here it matters. Without it a host reboot
+    # brings the node back against a database that never started.
+    restart: unless-stopped
+
+  # hawier control node: full Mgmt + DDI + background engines
+  # (rollouts, auto-assign). One control node per deployment.
+  hawier-control:
+    image: {{ hawier_repo }}:{{ hawier_version }}-server
+    pull_policy: never
+    # Plain "started", not "healthy". The health gate belongs to the play,
+    # which can say what it is waiting for and give up saying so: waiting
+    # inside `up -d` is implemented by whatever compose the engine hands off
+    # to, and under podman that is a silent, unbounded block.
+    #
+    # Nor does the node need the gate: it waits for its database itself
+    # (HAWIER_DB_WAIT_SECS). That used to be `restart`'s job here, which was
+    # wrong — podman-compose does not apply a restart policy, so the node that
+    # lost the race to postgres stayed `Exited (1)` and the deploy waited for
+    # something that was never coming back.
+    depends_on:
+      - postgres
+    environment:
+      HAWIER_ROLE: control
+      # Explicit, and unique among nodes sharing this database: the default is
+      # a hash of the container hostname, which docker regenerates on every
+      # recreate, so incident numbers would wander between deploys.
+      HAWIER_NODE_ID: "{{ hawier_node_id }}"
+      HAWIER_BIND_ADDR: 0.0.0.0:8080
+      # The node retries this at startup rather than exiting, because on one
+      # host the database is starting alongside it and after a reboot nothing
+      # decides the order.
+      HAWIER_DATABASE_URL: "postgres://{{ hawier_db_user }}:{{ hawier_secrets.postgres_password }}@postgres:5432/{{ hawier_db_name }}"
+      HAWIER_ARTIFACT_DIR: /artifacts
+      # Storage and event delivery are wasm extensions (EXTENSIONS.md).
+      # Without the first, artifacts answer 503 — there is no built-in store.
+      HAWIER_EXT_STORAGE: {{ hawier_ext_storage }}
+      HAWIER_EXT_EVENT_SINK: {{ hawier_ext_event_sink }}
+      HAWIER_EXT_RETENTION: {{ hawier_ext_retention }}
+      HAWIER_EXT_ROLLOUT: {{ hawier_ext_rollout }}
+      HAWIER_EXT_CONSOLE: {{ hawier_ext_console }}
+      HAWIER_EXT_AUTHZ: {{ hawier_ext_authz }}
+      # Has to match the artifact volume below — a deployment fact, not an
+      # operator preference, so it is pinned in the environment and the
+      # console shows it as uneditable.
+      HAWIER_EXT_FS_ROOT: /artifacts
+      # Everything else a module reads lives here and is editable from the
+      # console. This file is written by the node; ansible never touches it.
+      HAWIER_EXT_PARAMS_FILE: /etc/hawier/extensions.env
+      # Both of these have silent development defaults, so they are always
+      # set explicitly (see roles/stack/tasks/secrets.yml).
+      HAWIER_MGMT_POOL_SIZE: "{{ hawier_mgmt_pool_size }}"
+      # Deliberately its own pool: artifact downloads and polling must not
+      # queue behind the console.
+      HAWIER_DDI_POOL_SIZE: "{{ hawier_ddi_pool_size }}"
+      HAWIER_MGMT_USERS: "{{ hawier_secrets.mgmt_users }}"
+      HAWIER_INTERNAL_TOKEN: "{{ hawier_secrets.internal_token }}"
+      RUST_LOG: {{ hawier_rust_log }}
+      http_proxy: ""
+      https_proxy: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+    # busybox wget, already in the alpine image. The console adopts the
+    # extension-declared navigation tree once at startup and keeps whatever it
+    # got for the life of the process, so "started" is not good enough for it
+    # to wait on.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 30s
+    ports:
+{% if hawier_tls | bool %}
+      # Behind Caddy: loopback only. The proxy reaches it by service name over
+      # the compose network; the port is still published so the play's own
+      # health wait and verification can use it without going through TLS.
+      - "127.0.0.1:{{ hawier_publish_server.split(':')[-1] }}:8080"
+{% else %}
+      - "{{ hawier_publish_server }}:8080"
+{% endif %}
+    volumes:
+      - artifacts:/artifacts
+      # Writable: this is the node the console configures.
+      - ext-config:/etc/hawier
+    # The engine's default soft limit is 1024 descriptors. A node serving
+    # artifacts needs one socket plus one open file per download, so a
+    # thousand devices exhaust it — and the node then answers 500 ("No file
+    # descriptors available") to EVERYTHING, polls included, which the fleet
+    # reads as a failed cycle and retries. One benchmark run logged 154k of
+    # those.
+    # Rootless podman cannot raise the hard limit past the deploy user's own,
+    # so `ulimit -Hn` for that user has to be at least this.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    # Docker's daemon restarts these itself after a reboot. Podman needs
+    # `systemctl enable podman-restart` (or `--user` for rootless), otherwise
+    # this only covers a crash and not the host coming back up.
+    restart: unless-stopped
+
+  hawier-ui:
+    image: {{ hawier_repo }}:{{ hawier_version }}-ui
+    pull_policy: never
+    # Also plain. The console adopts its navigation tree once at startup, so
+    # it does need a node that answers — the play restarts it after the node
+    # reports healthy, which is a second of work and needs nothing from
+    # compose.
+    depends_on:
+      - hawier-control
+    environment:
+      HAWKBIT_MGMT_URL: http://hawier-control:8080
+      HAWIER_API_URL: http://hawier-control:8080
+      HAWIER_INTERNAL_TOKEN: "{{ hawier_secrets.internal_token }}"
+      HAWIER_BIND_ADDR: 0.0.0.0:8088
+      HAWIER_STATIC_DIR: /app/static
+      RUST_LOG: {{ hawier_ui_rust_log }}
+      http_proxy: ""
+      https_proxy: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8088/api/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+    ports:
+{% if hawier_tls | bool %}
+      - "127.0.0.1:{{ hawier_publish_ui.split(':')[-1] }}:8088"
+{% else %}
+      - "{{ hawier_publish_ui }}:8088"
+{% endif %}
+    restart: unless-stopped
+
+{% if hawier_tls | bool %}
+  # TLS, and the certificates that make it possible. Caddy does ACME itself —
+  # that is why it is here instead of nginx plus a client plus a cron job.
+  caddy:
+    image: {{ hawier_caddy_image }}
+    pull_policy: never
+    depends_on:
+      - hawier-control
+      - hawier-ui
+    # 80 is not optional: ACME HTTP-01 is validated over it, and Caddy also
+    # redirects plain HTTP to HTTPS there.
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    volumes:
+      - "{{ hawier_dir }}/Caddyfile:/etc/caddy/Caddyfile:ro"
+      # The certificates and the ACME account live here. Losing this volume
+      # means re-issuing, and Let's Encrypt rate-limits that: never
+      # `down -v`, never `volume rm`.
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+{% endif %}
+
+volumes:
+{% if hawier_tls | bool %}
+  caddy-data:
+  caddy-config:
+{% endif %}
+  postgres-data:
+  artifacts:
+  # Extension parameters, written by the node itself from the console.
+  # Never `down -v`, never `volume rm`, never `system prune --volumes`.
+  ext-config:

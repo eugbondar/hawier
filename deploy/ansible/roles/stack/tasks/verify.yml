@@ -1,0 +1,110 @@
+---
+# Not "the container started" but "what is running is what we built". The node
+# already answers /health by this point — main.yml waited for that, and said
+# so — and everything here is asked from the host over loopback, so no port has
+# to be reachable from the machine running make.
+
+- name: ask the node what it is running
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ hawier_publish_server.split(':')[-1] }}/rest/v1/system/extensions"
+    url_username: "{{ hawier_admin_user }}"
+    url_password: "{{ hawier_admin_pass }}"
+    force_basic_auth: true
+    return_content: true
+  register: hawier_node_info
+  no_log: true
+
+- name: the node is the build that was just shipped
+  ansible.builtin.assert:
+    that:
+      - hawier_node_info.json.node.build == hawier_version
+      - hawier_node_info.json.node.profile == 'release'
+      - hawier_node_info.json.node.role == 'control'
+      - hawier_node_info.json.node.paramsFileWritable
+    fail_msg: >-
+      the node reports build={{ hawier_node_info.json.node.build }}
+      profile={{ hawier_node_info.json.node.profile }}
+      role={{ hawier_node_info.json.node.role }}
+      paramsFileWritable={{ hawier_node_info.json.node.paramsFileWritable }}
+      — expected {{ hawier_version }} / release / control / true.
+    quiet: true
+  # `build` catches the other side of the ".git is dockerignored" trap: if the
+  # build args ever stop being passed the node stamps -nogit, and that is a
+  # red task instead of a mystery on /settings. `profile` comes from
+  # cfg!(debug_assertions) and is the one thing nothing can fake.
+  # `paramsFileWritable` is free in the same response and catches an
+  # ext-config volume whose ownership drifted — the console would otherwise
+  # silently show every extension parameter as read-only.
+
+- name: wait for the console
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ hawier_publish_ui.split(':')[-1] }}/api/health"
+    return_content: true
+  register: hawier_ui_health
+  until: (hawier_ui_health.status | default(0)) == 200
+  retries: 30
+  delay: 2
+
+- name: the console is the build that was just shipped
+  ansible.builtin.assert:
+    that: hawier_ui_health.json.build == hawier_version
+    fail_msg: >-
+      the console reports {{ hawier_ui_health.json.build }}, not
+      {{ hawier_version }} — its container was not recreated.
+    quiet: true
+
+# From the machine running make, over the public name: the one check that says
+# ACME actually finished. Issuance takes a few seconds on a first deploy, and
+# Caddy answers 502/503 until it has a certificate, so this retries.
+- name: the certificate is real and the console answers over TLS
+  ansible.builtin.uri:
+    url: "https://{{ hawier_console_host }}/api/health"
+    validate_certs: true
+    return_content: true
+    # The deploy reaches this host directly over ssh. An http_proxy in this
+    # machine's environment is for reaching the internet, and routing a check
+    # of the target through it answers 502 from the proxy and says nothing
+    # about the host.
+    use_proxy: false
+  register: hawier_tls_health
+  until: (hawier_tls_health.status | default(0)) == 200
+  retries: 30
+  delay: 5
+  delegate_to: localhost
+  become: false
+  when: hawier_tls | bool
+
+- name: and so does the fleet's side of it
+  ansible.builtin.uri:
+    url: "https://{{ hawier_ddi_host }}/health"
+    validate_certs: true
+    return_content: true
+    # The deploy reaches this host directly over ssh. An http_proxy in this
+    # machine's environment is for reaching the internet, and routing a check
+    # of the target through it answers 502 from the proxy and says nothing
+    # about the host.
+    use_proxy: false
+  register: hawier_tls_ddi
+  until: (hawier_tls_ddi.status | default(0)) == 200 and (hawier_tls_ddi.content | default('')) is search('ok')
+  retries: 10
+  delay: 5
+  delegate_to: localhost
+  become: false
+  when: hawier_tls | bool
+
+- name: up
+  ansible.builtin.debug:
+    msg:
+      - "hawier {{ hawier_version }} on {{ inventory_hostname }}"
+      - "  console: {{ 'https://' ~ hawier_console_host if hawier_tls | bool else 'http://' ~ hawier_publish_ui }}"
+      - "  mgmt api: {{ ('https://' ~ hawier_ddi_host) if hawier_tls | bool else ('http://' ~ hawier_publish_server) }}/rest/v1"
+
+# Printed on the deploy that created them and never again. A deploy that
+# leaves the operator unable to log in and no hint where to look is a broken
+# deploy; the terminal that just ran this already had root on the host.
+- name: the generated console credentials, shown once
+  ansible.builtin.debug:
+    msg:
+      - "HAWIER_MGMT_USERS = {{ hawier_secrets.mgmt_users }}"
+      - "kept in {{ hawier_dir }}/secrets/mgmt_users ({{ hawier_owner }}, 0600)"
+  when: hawier_mgmt_generated.changed and hawier_show_credentials

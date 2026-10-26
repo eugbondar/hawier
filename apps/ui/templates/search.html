@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="section-title" data-help="console/search#global-search">Search: {{ q }}</div>
+  {%- if q.trim().is_empty() %}
+  <div class="empty-cell">Enter a query to search across resources and the action log.</div>
+  {%- else if empty %}
+  <div class="empty-cell">No matching results.</div>
+  {%- else %}
+  {%- for section in sections %}
+  {%- if !section.rows.is_empty() %}
+  <div class="search-section">
+    <h2>{{ section.title }}</h2>
+    <ul>{% for row in section.rows %}<li><a href="{{ row.href }}">{{ row.label }}</a></li>{% endfor %}</ul>
+  </div>
+  {%- endif %}
+  {%- endfor %}
+  {%- endif %}
+</section>
+{% endblock %}

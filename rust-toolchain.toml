@@ -1,0 +1,12 @@
+# The host floated on `rustup stable` while the image floated on `rust:1-alpine`.
+# A toolchain bump changes the rustc fingerprint and invalidates the whole of
+# target/ at once, so the next build silently writes a second full copy beside
+# the first — the 27c8b1c accident, but for every artifact rather than one
+# dependency. Pinning makes that a reviewed event; keep this in step with the
+# `FROM rust:<version>-alpine` in the Dockerfile.
+[toolchain]
+channel = "1.97"
+# `make lint` is fmt + clippy, so the pin has to carry them: without this a
+# fresh checkout gets a toolchain that cannot run it.
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-wasip1"]

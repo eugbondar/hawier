@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% import "macros.html" as m %}
+{% block content %}
+<section class="panel resource-panel">
+  {#- The toolbar carries navigation only: bulk operations live in the
+      row context menu, so nothing here can overflow the fixed height. -#}
+  <div class="resource-toolbar">
+    <strong data-help="{{ layout.help }}">{{ label }}</strong>
+    <span class="toolbar-separator"></span>
+    {%- match new_href %}
+    {%- when Some with (href) %}<a class="primary-button" href="{{ href }}" data-help="console/lists#creating">New</a>
+    {%- when None %}<span class="ghost-button disabled">New hidden until verified</span>
+    {%- endmatch %}
+    <a class="ghost-button" href="/{{ resource_id }}" data-help="console/lists#filters">Reset</a>
+    <button type="button" class="ghost-button" data-filters-toggle data-help="console/lists#filters">Filters</button>
+    {%- if !bulk.is_empty() %}
+    <button type="button" class="ghost-button bulk-trigger" data-bulk-menu hidden title="Operations on the selected rows" data-help="console/lists#bulk"><span data-bulk-count>0 selected</span></button>
+    {%- endif %}
+  </div>
+  <div class="list-layout">
+    <aside class="filter-panel">
+      <form method="get" action="/{{ resource_id }}">
+        <input type="hidden" name="view" value="{{ view }}">
+        <label data-help="reference/rsql#the-query-language">FIQL<input name="q" value="{{ q }}" placeholder="name==prod-* or status==ERROR"></label>
+        <label data-help="reference/sorting#sort-orders">Sort<input name="sort" value="{{ sort }}" placeholder="createdAt:DESC"></label>
+        <label data-help="console/lists#page-size">Limit<input name="limit" type="number" min="10" max="100" value="{{ limit }}"></label>
+        <details open data-help="reference/columns#choosing">
+          <summary>Columns</summary>
+          {%- for column in column_picks %}
+          <label><input type="checkbox" name="col" value="{{ column.name }}"{% if column.checked %} checked{% endif %}>{{ column.name }}</label>
+          {%- endfor %}
+          <input type="hidden" name="columns" data-columns-value>
+        </details>
+        <button type="submit">Apply</button>
+      </form>
+      <form method="post" action="/views" class="save-view-form" data-help="console/views#saved-views">
+        <input type="hidden" name="resource" value="{{ resource_id }}">
+        <input type="hidden" name="q" value="{{ q }}">
+        <input type="hidden" name="sort" value="{{ sort }}">
+        <input type="hidden" name="columns" value="{{ columns_csv }}">
+        <input type="hidden" name="limit" value="{{ limit }}">
+        <label>Save view<input name="name" required></label>
+        <button type="submit">Save</button>
+      </form>
+    </aside>
+    <div class="table-wrap">
+      {% call m::pager(pager) %}{% endcall %}
+      <form id="bulk-form" method="post" action="/{{ resource_id }}/bulk" data-bulk-form></form>
+      {%- match error %}
+      {%- when Some with (message) %}
+      <div class="callout danger">{{ message }}</div>
+      {%- when None %}
+      <table data-selectable>
+        <thead><tr>
+          <th class="select-cell" data-help="console/lists#selection"><label class="select-box"><input type="checkbox" data-select-all title="Select all on this page"></label></th>
+          {%- for header in headers %}<th data-help="{{ header.help }}"><a href="{{ header.href }}">{{ header.label }}</a></th>{% endfor %}
+        </tr></thead>
+        <tbody>
+          {%- if rows.is_empty() %}
+          <tr><td colspan="{{ colspan }}" class="empty-cell">No rows returned for this view.</td></tr>
+          {%- else %}
+          {%- for row in rows %}
+          <tr data-href="{{ row.href }}">
+            {#- The whole cell is the label: a click one pixel beside the box
+                still selects the row instead of navigating away. -#}
+            <td class="select-cell" data-help="console/lists#selection"><label class="select-box"><input type="checkbox" form="bulk-form" name="ids" value="{{ row.id }}"></label></td>
+            {%- for cell in row.cells %}<td>{% call m::cell(cell) %}{% endcall %}</td>{% endfor %}
+          </tr>
+          {%- endfor %}
+          {%- endif %}
+        </tbody>
+      </table>
+      {%- endmatch %}
+    </div>
+  </div>
+</section>
+{%- if !bulk.is_empty() %}
+{#- Right-click (or the toolbar counter) opens this over the selection. -#}
+<div class="menu" data-context-menu hidden data-help="console/lists#bulk">
+  <div class="menu-title"><span data-bulk-count>0 selected</span></div>
+  {%- for group in bulk %}
+  {%- match group.picker %}
+  {%- when Some with (picker) %}
+  <div class="menu-group">
+    {% call m::picker(picker) %}{% endcall %}
+    <span class="menu-group-actions">
+      {%- for action in group.actions %}
+      <button class="{% if action.danger %}danger-button{% else %}ghost-button{% endif %}" type="submit" form="bulk-form" name="action" value="{{ action.id }}" data-help="{{ action.help }}"{% if action.danger %} data-bulk-danger="{{ action.label }}"{% endif %}>{{ action.label }}</button>
+      {%- endfor %}
+    </span>
+  </div>
+  {%- when None %}
+  {%- for action in group.actions %}
+  <button class="menu-item{% if action.danger %} danger{% endif %}" type="submit" form="bulk-form" name="action" value="{{ action.id }}" data-help="{{ action.help }}"{% if action.danger %} data-bulk-danger="{{ action.label }}"{% endif %}>{{ action.label }}</button>
+  {%- endfor %}
+  {%- endmatch %}
+  {%- endfor %}
+</div>
+{%- endif %}
+{% endblock %}

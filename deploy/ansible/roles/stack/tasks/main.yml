@@ -1,0 +1,300 @@
+---
+- name: the stack directory
+  ansible.builtin.file:
+    path: "{{ hawier_dir }}"
+    state: directory
+    owner: "{{ hawier_owner }}"
+    group: "{{ hawier_group }}"
+    mode: "0750"
+
+- name: secrets
+  ansible.builtin.include_tasks: secrets.yml
+
+# 0600: it carries the secrets itself now, rather than pointing at a .env
+# beside it. See the header of the template for why.
+- name: the compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ hawier_dir }}/docker-compose.yml"
+    owner: "{{ hawier_owner }}"
+    group: "{{ hawier_group }}"
+    mode: "0600"
+  register: hawier_compose_file
+  no_log: true
+
+# Left over from when the secrets lived there and compose was trusted to read
+# it. Removed rather than ignored: a stale file with a live password in it is
+# worse than no file.
+- name: the Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ hawier_dir }}/Caddyfile"
+    owner: "{{ hawier_owner }}"
+    group: "{{ hawier_group }}"
+    mode: "0644"
+  when: hawier_tls | bool
+  register: hawier_caddyfile
+
+- name: the .env it no longer uses
+  ansible.builtin.file:
+    path: "{{ hawier_dir }}/.env"
+    state: absent
+
+# Compose is asked to do exactly one thing — `up -d` — and nothing else. Even
+# `ps` differs: podman-compose takes no service name there, so
+# `compose ps -q hawier-control` is a usage error rather than an id. State
+# comes from the engine, which has one spelling. The container names cover both
+# layouts: docker compose writes <project>-<service>-1, podman-compose
+# <project>_<service>_1. And `up -d` is wrapped in `timeout`, because a compose
+# that blocks forever looks exactly like one that is working.
+- name: the containers, before
+  ansible.builtin.command:
+    argv:
+      - "{{ hawier_engine }}"
+      - ps
+      - -a
+      - --filter
+      - "name={{ hawier_project }}"
+      - --format
+      - "{% raw %}{{.ID}}{% endraw %}"
+  register: hawier_containers_before
+  changed_when: false
+  failed_when: false
+
+- name: starting the stack, then waiting for the node to answer
+  ansible.builtin.debug:
+    msg: >-
+      {{ hawier_compose_cmd | join(' ') }} up -d in {{ hawier_dir }}, at most
+      {{ hawier_compose_timeout }}s; then {{ hawier_health_retries }} tries
+      {{ hawier_health_delay }}s apart for the node's /health, stopping early if
+      it starts restarting instead. On a first deploy most of the waiting is the
+      node creating the schema. No arithmetic in this message on purpose: a
+      value handed in with -e is a string, and a progress line has already
+      stopped three deploys.
+
+- name: the stack
+  block:
+    # `up -d` is a task and not a handler: compose is the reconciler, and it
+    # has to run every deploy so a container that died between runs comes back.
+    - name: bring it up
+      ansible.builtin.command:
+        argv: "{{ ['timeout', hawier_compose_timeout | string] + hawier_compose_cmd + ['up', '-d', '--remove-orphans'] }}"
+        chdir: "{{ hawier_dir }}"
+      register: hawier_compose_up
+      changed_when: false
+
+    - name: the containers, after
+      ansible.builtin.command:
+        argv:
+          - "{{ hawier_engine }}"
+          - ps
+          - -a
+          - --filter
+          - "name={{ hawier_project }}"
+          - --format
+          - "{% raw %}{{.ID}}{% endraw %}"
+      register: hawier_containers_after
+      changed_when: hawier_containers_after.stdout_lines | sort != hawier_containers_before.stdout_lines | sort
+      # The set of container ids is the honest answer to "did anything change",
+      # and the only one every engine gives the same way: compose writes its
+      # progress to stderr, and the words in it differ between the compose
+      # plugin, podman's provider and podman-compose.
+
+    # The node's container id. Asked of the engine with a name pattern that
+    # fits both layouts — `compose ps -q <service>` is not portable, it is a
+    # usage error under podman-compose. The filter's regexp is Go's, so
+    # `[0-9]+` and not `[0-9]\+`.
+    - name: which container is the node
+      ansible.builtin.command:
+        argv:
+          - "{{ hawier_engine }}"
+          - ps
+          - -a
+          - --filter
+          - "name=^{{ hawier_project }}[-_]hawier-control[-_][0-9]+$"
+          - --format
+          - "{% raw %}{{.ID}}{% endraw %}"
+      register: hawier_node_cid
+      changed_when: false
+
+    - name: it exists
+      ansible.builtin.assert:
+        that: hawier_node_cid.stdout | trim | length > 0
+        fail_msg: >-
+          compose created no container for hawier-control. Its own output was:
+          {{ hawier_compose_up.stderr | default('') }}
+          {{ hawier_compose_up.stdout | default('') }}
+        quiet: true
+
+    - name: how many times it had been restarted before we started waiting
+      ansible.builtin.command:
+        argv:
+          - "{{ hawier_engine }}"
+          - inspect
+          - --format
+          - "{% raw %}{{.RestartCount}}{% endraw %}"
+          - "{{ hawier_node_cid.stdout | trim }}"
+      register: hawier_node_restarts
+      changed_when: false
+      failed_when: false
+
+    - name: remember it
+      ansible.builtin.set_fact:
+        hawier_node_restarts_before: "{{ hawier_node_restarts.stdout | trim | int }}"
+
+    - name: the probe the wait loop uses
+      ansible.builtin.template:
+        src: wait_for_node.sh.j2
+        dest: "{{ hawier_dir }}/wait-for-node.sh"
+        owner: "{{ hawier_owner }}"
+        group: "{{ hawier_group }}"
+        mode: "0750"
+      changed_when: false
+
+    # One question per attempt, so ansible counts the attempts down where they
+    # can be seen, and a loop is caught on the first one rather than after all
+    # of them. Both signals have to be inside this loop: a container that exits
+    # on startup is still "Up" for the first moment after `up -d`, so a check
+    # placed before the wait sees a healthy node and then waits out the whole
+    # timeout anyway — and waiting it out is not free. `restart: unless-stopped`
+    # retries forever, under podman with no backoff at all, which is a core at
+    # 100% and a veth pair created and destroyed once a second in dmesg.
+    - name: wait for the node, and give up at once if it is looping
+      ansible.builtin.command:
+        argv: ["{{ hawier_dir }}/wait-for-node.sh"]
+      register: hawier_node_probe
+      # Either answer ends the loop. `until` is the only thing that can end it:
+      # a failed_when marks an attempt failed and ansible retries it anyway, so
+      # putting the loop-detection there looks right and waits out every retry.
+      until: hawier_node_probe.stdout is search('^ready|^looping')
+      retries: "{{ hawier_health_retries | int }}"
+      delay: "{{ hawier_health_delay | int }}"
+      changed_when: false
+
+    - name: it is looping, and no amount of waiting fixes that
+      ansible.builtin.fail:
+        msg: >-
+          {{ hawier_node_probe.stdout | trim }} — every retry of it costs the
+          host a container and a veth pair, so this stops here. Its log is
+          below.
+      when: hawier_node_probe.stdout is search('^looping')
+
+  rescue:
+    - name: the stack did not come up
+      ansible.builtin.include_tasks: diagnose.yml
+
+    # A stack that never came up and keeps restarting leaves the host at 100%
+    # long after the deploy has given up. Stopped only when there was nothing
+    # running here before this deploy: if something was, it is the operator's
+    # to decide about and not ours to take down.
+    - name: stop the stack it was never able to start
+      ansible.builtin.command:
+        argv: "{{ ['timeout', hawier_compose_timeout | string] + hawier_compose_cmd + ['stop'] }}"
+        chdir: "{{ hawier_dir }}"
+      when: hawier_containers_before.stdout | trim | length == 0
+      changed_when: true
+      failed_when: false
+
+    - name: stop here
+      ansible.builtin.fail:
+        msg: >-
+          the stack on {{ inventory_hostname }} did not reach a node answering
+          /health. The compose state and the tail of each service's log are
+          above.
+          {{ 'It has been stopped, so the host is not left restarting it.'
+             if hawier_containers_before.stdout | trim | length == 0
+             else 'Containers that were already running have been left alone.' }}
+
+# The console adopts its navigation tree once, at its own startup, and keeps
+# whatever it got for the life of the process. So it is restarted whenever any
+# container was created or replaced — including its own, on a first deploy,
+# where it started alongside a node that was still creating the schema. Under a
+# second, and it removes the whole class of "the new tab is not in the menu".
+# Through the engine as well: `restart` is one of the verbs podman-compose has,
+# but it is one more thing that would have to behave identically, and the
+# container is already identified by name just above.
+# The Caddyfile is a bind mount, so `up -d` has no reason to recreate the
+# container when only its contents changed — and Caddy reads it once, at start.
+# A routing change would be written to the host and silently not in effect,
+# which is how /health went on being answered by the console after it had been
+# pointed at the node.
+#
+# Unconditional, and not `when: the template reported changed`: that is true
+# only on the run that writes the file, so a run that wrote it and then failed
+# for any other reason leaves a config that never applied — which is exactly
+# what happened. A reload is graceful and costs nothing.
+#
+# The id comes from its own task and the call is an argv list. The version of
+# this with `$(...)` inside a `>-` block broke on both counts: `command` passes
+# a substitution through as a literal, and a continuation line indented deeper
+# than the first keeps its newline, which split the command into three.
+- name: which container is caddy
+  ansible.builtin.command:
+    argv:
+      - "{{ hawier_engine }}"
+      - ps
+      - -a
+      - --filter
+      - "name=^{{ hawier_project }}[-_]caddy[-_][0-9]+$"
+      - --format
+      - "{% raw %}{{.ID}}{% endraw %}"
+  register: hawier_caddy_cid
+  changed_when: false
+  when: hawier_tls | bool
+
+- name: caddy applies the Caddyfile
+  when: hawier_tls | bool and (hawier_caddy_cid.stdout | default('') | trim) | length > 0
+  block:
+    - name: by reloading, which drops no connection
+      ansible.builtin.command:
+        argv:
+          - "{{ hawier_engine }}"
+          - exec
+          - "{{ hawier_caddy_cid.stdout_lines | first | default('') }}"
+          - caddy
+          - reload
+          - --config
+          - /etc/caddy/Caddyfile
+      changed_when: false
+
+  rescue:
+    # A reload talks to the admin API, which the running container only has if
+    # it was started with a config that leaves it on. Restarting is how a
+    # container started from an older config gets there, and it is the only
+    # way out of that circle.
+    - name: or by restarting it, which is how an older config gets replaced
+      ansible.builtin.command:
+        argv: ["{{ hawier_engine }}", restart, "{{ hawier_caddy_cid.stdout_lines | first | default('') }}"]
+      changed_when: true
+
+- name: which container is the console
+  ansible.builtin.command:
+    argv:
+      - "{{ hawier_engine }}"
+      - ps
+      - -a
+      - --filter
+      - "name=^{{ hawier_project }}[-_]hawier-ui[-_][0-9]+$"
+      - --format
+      - "{% raw %}{{.ID}}{% endraw %}"
+  register: hawier_ui_cid
+  changed_when: false
+
+# The console adopts its navigation tree once, at its own startup, and keeps
+# whatever it got for the life of the process. So it is restarted whenever any
+# container was created or replaced — including its own, on a first deploy,
+# where it started alongside a node that was still creating the schema. Under a
+# second, and it removes the whole class of "the new tab is not in the menu".
+- name: the console takes its surfaces from a node that is now answering
+  ansible.builtin.command:
+    argv: ["{{ hawier_engine }}", restart, "{{ hawier_ui_cid.stdout_lines | first | default('') }}"]
+  when:
+    - (hawier_ui_cid.stdout | default('') | trim) | length > 0
+    - hawier_containers_after.stdout_lines | sort != hawier_containers_before.stdout_lines | sort
+  changed_when: true
+
+- name: verify
+  ansible.builtin.include_tasks: verify.yml
+
+- name: prune
+  ansible.builtin.include_tasks: prune.yml

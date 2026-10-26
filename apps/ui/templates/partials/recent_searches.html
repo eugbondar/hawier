@@ -1,0 +1,9 @@
+{%- if recent.is_empty() -%}
+<div class="live-search-state">No recent searches yet.</div>
+{%- else -%}
+<div class="live-search-group-title" data-help="console/search#recent">Recent searches</div>
+{%- for entry in recent -%}
+<span class="list-row"><a class="list-row-label" href="{{ entry.href }}">{{ entry.q }}</a><span class="list-row-actions"><form method="post" action="{{ entry.delete_action }}"><button class="chip-remove" type="submit" title="Forget this search">×</button></form></span></span>
+{%- endfor -%}
+<form method="post" action="/search/history/clear" class="recent-search-clear"><button class="ghost-button" type="submit">Clear history</button></form>
+{%- endif -%}
