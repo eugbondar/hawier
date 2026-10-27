@@ -1195,3 +1195,77 @@ async fn a_hardened_tenant_refuses_an_untyped_target() {
     }
     assert_eq!(common::action_count(&server, untyped.id).await, 0);
 }
+
+/// hawkBit's `and` / `or` keywords mean `;` / `,`, and a word that is not a
+/// keyword is a 400 — never one comparison against a spaced value that
+/// silently matches nothing (a rollout over such a filter has no targets).
+#[tokio::test]
+#[ignore]
+async fn rsql_keywords_match_the_punctuation_and_stray_words_are_refused() {
+    let server = common::spawn().await;
+    let api = Api::new(&server);
+    let (status, _) = api
+        .send(
+            reqwest::Method::POST,
+            "/rest/v1/targets",
+            &json!([
+                { "controllerId": "fleet-1", "name": "rock and roll" },
+                { "controllerId": "fleet-2" },
+                { "controllerId": "cross-1" },
+                { "controllerId": "other-1" }
+            ]),
+        )
+        .await;
+    assert_eq!(status, 201);
+
+    let total = |q: &str| {
+        let path = format!("/rest/v1/targets?q={}", q.replace(' ', "%20"));
+        let api = &api;
+        async move { total_of(api, &path).await }
+    };
+    assert_eq!(total("controllerid==fleet-*,controllerid==cross*").await, 3);
+    assert_eq!(
+        total("controllerid==fleet-* or controllerid==cross*").await,
+        3
+    );
+    assert_eq!(
+        total("controllerid==fleet-* and name==\"rock and roll\"").await,
+        1
+    );
+    assert_eq!(
+        total("(controllerid==fleet-1 or controllerid==cross-1) and controllerid!=cross-1").await,
+        1
+    );
+
+    for q in [
+        "controllerid==fleet-*%20OR%20controllerid==cross*",
+        "controllerid==fleet-*%20%26%26%20controllerid==cross*",
+        "name==rock%20and%20roll",
+    ] {
+        let (status, error) = api.get(&format!("/rest/v1/targets?q={q}")).await;
+        assert_eq!(status, 400, "{q} must be refused, got {error}");
+        assert_eq!(
+            error["errorCode"],
+            "hawkbit.server.error.rest.param.rsqlInvalid"
+        );
+    }
+
+    let ds = common::seed_ds_with_artifact(&server, "DEFAULT", "kw-fw", b"kw-payload").await;
+    let (status, error) = api
+        .send(
+            reqwest::Method::POST,
+            "/rest/v1/rollouts",
+            &json!({
+                "name": "keyword-typo",
+                "distributionSetId": ds.ds_id,
+                "targetFilterQuery": "controllerid==fleet-* AND controllerid==cross*",
+                "amountGroups": 1,
+                "type": "forced"
+            }),
+        )
+        .await;
+    assert_eq!(status, 400, "{error}");
+    let (status, rollouts) = api.get("/rest/v1/rollouts").await;
+    assert_eq!(status, 200);
+    assert_eq!(rollouts["total"], 0, "no rollout was created: {rollouts}");
+}

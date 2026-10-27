@@ -841,6 +841,24 @@ async fn global_search_finds_seeded_rows_on_the_server() {
         "substring search failed"
     );
 
+    // Spaces and the RSQL keywords `and` / `or` in a needle are text.
+    sqlx::query(
+        "INSERT INTO sp_target
+         (created_at, created_by, last_modified_at, last_modified_by, optlock_revision,
+          tenant, name, controller_id, sec_token, request_controller_attributes, update_status)
+         VALUES (1, 'audit', 1, 'audit', 1, 'DEFAULT', 'north and south', 'north and south',
+                 'keyword-token', FALSE, 0)",
+    )
+    .execute(&stack.server_state.pool)
+    .await
+    .unwrap();
+    let page = get_html(&stack, &http, &cookie, "/search?q=h+and+s").await;
+    assert_no_error(&page, "/search");
+    assert!(
+        page.contains("north and south"),
+        "a needle with a keyword was not searched as text"
+    );
+
     // Searching is remembered and offered back.
     let recents = get_html(&stack, &http, &cookie, "/search/live?q=").await;
     assert!(

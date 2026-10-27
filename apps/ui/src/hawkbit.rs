@@ -385,7 +385,9 @@ pub async fn upload_artifact(
 }
 
 /// Strip RSQL metacharacters from user input before embedding it in a
-/// query: the needle is data, never syntax.
+/// query: the needle is data, never syntax. Callers wrap the result in
+/// `"..."` — it holds no quote or backslash to break out with — so spaces and
+/// the words `and`/`or` stay text too.
 pub fn rsql_literal(value: &str) -> String {
     value
         .trim()

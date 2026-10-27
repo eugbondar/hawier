@@ -90,7 +90,8 @@ pub async fn search(state: &AppState, session: &Session, q: &str, limit: usize) 
     if needle.is_empty() {
         return Vec::new();
     }
-    let q =
-        format!("action==*{needle}*,resource==*{needle}*,error==*{needle}*,resourceid==*{needle}*");
+    let q = ["action", "resource", "error", "resourceid"]
+        .map(|field| format!("{field}==\"*{needle}*\""))
+        .join(",");
     fetch(state, session, Some(&q), limit).await
 }

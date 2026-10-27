@@ -16,13 +16,20 @@ assignedDistributionSet==null
 
 ## Combining {#combining}
 
-`;` :: and
-`,` :: or
+`;` or `and` :: and
+`,` or `or` :: or
 `( )` :: grouping
 
 **`;` binds tighter than `,`.** So `a==1,b==2;c==3` means `a==1 OR (b==2 AND c==3)`. Use brackets when you mean otherwise.
 
-There are no `and` / `or` keywords. Only the two punctuation marks.
+The words `and` and `or` mean exactly the same as `;` and `,`, and the two spellings mix freely:
+
+```
+controllerId==fleet-* or controllerId==cross-*
+(name==a or name==b) and updateStatus==error
+```
+
+The words must be lowercase and have a space on each side. `AND`, `OR` or `&&` are not operators: the query is refused rather than quietly matching nothing. Spaces around `;` `,` and brackets do not matter.
 
 ## Operators {#operators}
 
@@ -60,12 +67,15 @@ rollout!=null
 
 ## Quoting {#quoting}
 
-An unquoted value ends at the first `,` `;` `(` or `)` and is trimmed of spaces. Anything containing those, or leading and trailing spaces you mean to keep, must be quoted:
+An unquoted value ends at the first space, `,` `;` `(` or `)`. Anything containing those must be quoted:
 
 ```
 name=="my device, mark 2"
 group=="eu/west (spare)"
+name=="rock and roll"
 ```
+
+Unquoted, `name==rock and roll` is refused: `roll` is not a comparison.
 
 Both single and double quotes work, and `\` escapes inside them.
 

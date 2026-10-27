@@ -1,11 +1,17 @@
 //! RSQL (FIQL) parser → parameterized SQL, hawkBit `q=` compatible.
 //!
 //! Grammar (hand-rolled recursive descent — no dependency justifies itself):
-//!   or    := and ( "," and )*
-//!   and   := cmp ( ";" cmp )*
+//!   or    := and ( ( "," | " or " ) and )*
+//!   and   := cmp ( ( ";" | " and " ) cmp )*
 //!   cmp   := "(" or ")" | selector op args
 //!   op    := == != =in= =out= =lt= =le= =gt= =ge= < <= > >=
 //!   args  := value | "(" value ("," value)* ")"
+//!
+//! As in hawkBit's rsql-parser: the keywords are lowercase and need
+//! whitespace on both sides, an unquoted value ends at whitespace, and
+//! whitespace around separators and parentheses is skipped. Ending the value
+//! at whitespace is what makes `a==1 AND b==2` a 400 rather than one
+//! comparison against the value `1 AND b==2` that silently matches nothing.
 //!
 //! `*` wildcards in ==/!= become case-insensitive ILIKE patterns (hawkBit's
 //! behaviour for wildcard string matching).
@@ -148,9 +154,41 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn skip_ws(&mut self) -> usize {
+        let start = self.pos;
+        while self.peek().is_some_and(|c| c.is_ascii_whitespace()) {
+            self.pos += 1;
+        }
+        self.pos - start
+    }
+
+    /// A logical separator: its punctuation, or its keyword with whitespace
+    /// on both sides. Leaves the position untouched when neither is there.
+    fn eat_separator(&mut self, symbol: u8, keyword: &[u8]) -> bool {
+        let start = self.pos;
+        let spaced = self.skip_ws() > 0;
+        if self.eat(symbol) {
+            self.skip_ws();
+            return true;
+        }
+        let rest = &self.input[self.pos..];
+        if spaced
+            && rest.starts_with(keyword)
+            && rest
+                .get(keyword.len())
+                .is_some_and(|c| c.is_ascii_whitespace())
+        {
+            self.pos += keyword.len();
+            self.skip_ws();
+            return true;
+        }
+        self.pos = start;
+        false
+    }
+
     fn parse_or(&mut self) -> AppResult<Node> {
         let mut nodes = vec![self.parse_and()?];
-        while self.eat(b',') {
+        while self.eat_separator(b',', b"or") {
             nodes.push(self.parse_and()?);
         }
         Ok(if nodes.len() == 1 {
@@ -162,7 +200,7 @@ impl<'a> Parser<'a> {
 
     fn parse_and(&mut self) -> AppResult<Node> {
         let mut nodes = vec![self.parse_cmp()?];
-        while self.eat(b';') {
+        while self.eat_separator(b';', b"and") {
             nodes.push(self.parse_cmp()?);
         }
         Ok(if nodes.len() == 1 {
@@ -173,8 +211,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_cmp(&mut self) -> AppResult<Node> {
+        self.skip_ws();
         if self.eat(b'(') {
             let node = self.parse_or()?;
+            self.skip_ws();
             if !self.eat(b')') {
                 return Err(self.err("expected ')'"));
             }
@@ -228,9 +268,13 @@ impl<'a> Parser<'a> {
 
     fn parse_args(&mut self) -> AppResult<Vec<String>> {
         if self.eat(b'(') {
+            self.skip_ws();
             let mut args = vec![self.parse_value()?];
+            self.skip_ws();
             while self.eat(b',') {
+                self.skip_ws();
                 args.push(self.parse_value()?);
+                self.skip_ws();
             }
             if !self.eat(b')') {
                 return Err(self.err("expected ')' after value list"));
@@ -271,7 +315,7 @@ impl<'a> Parser<'a> {
             _ => {
                 let start = self.pos;
                 while let Some(c) = self.peek() {
-                    if matches!(c, b',' | b';' | b'(' | b')') {
+                    if matches!(c, b',' | b';' | b'(' | b')') || c.is_ascii_whitespace() {
                         break;
                     }
                     self.pos += 1;
@@ -279,9 +323,7 @@ impl<'a> Parser<'a> {
                 if self.pos == start {
                     return Err(self.err("expected value"));
                 }
-                Ok(String::from_utf8_lossy(&self.input[start..self.pos])
-                    .trim()
-                    .to_string())
+                Ok(String::from_utf8_lossy(&self.input[start..self.pos]).into_owned())
             }
         }
     }
@@ -506,6 +548,7 @@ impl<'m> SqlBuilder<'m> {
 pub fn to_sql(query: &str, map: &FieldMap, bind_offset: usize) -> AppResult<WhereClause> {
     let mut parser = Parser::new(query);
     let node = parser.parse_or()?;
+    parser.skip_ws();
     if parser.pos != parser.input.len() {
         return Err(parser.err("unexpected trailing input"));
     }
@@ -656,5 +699,87 @@ mod tests {
         assert!(to_sql("bogus==1", &target_map(), 0).is_err());
         assert!(to_sql("name==", &target_map(), 0).is_err());
         assert!(to_sql("name==a,,", &target_map(), 0).is_err());
+    }
+
+    fn same_sql(left: &str, right: &str) {
+        let left = to_sql(left, &target_map(), 0).unwrap();
+        let right = to_sql(right, &target_map(), 0).unwrap();
+        assert_eq!(left.sql, right.sql);
+        assert_eq!(left.binds, right.binds);
+    }
+
+    #[test]
+    fn keywords_mean_the_punctuation() {
+        same_sql(
+            "controllerid==fleet-* or controllerid==cross*",
+            "controllerid==fleet-*,controllerid==cross*",
+        );
+        same_sql("name==a and controllerid!=c", "name==a;controllerid!=c");
+        // AND binds tighter, in either spelling and in a mix of them.
+        same_sql(
+            "name==a or name==b and controllerid!=c",
+            "name==a,name==b;controllerid!=c",
+        );
+        same_sql(
+            "name==a, name==b and controllerid!=c",
+            "name==a,name==b;controllerid!=c",
+        );
+        same_sql(
+            "(name==a or name==b) and controllerid!=c",
+            "(name==a,name==b);controllerid!=c",
+        );
+        same_sql(
+            "name=='x' or updatestatus=in=(pending,error)",
+            "name==x,updatestatus=in=(pending,error)",
+        );
+    }
+
+    #[test]
+    fn whitespace_around_separators_is_skipped() {
+        same_sql(
+            "  ( name==a ,\tname==b )  ;  controllerid!=c  ",
+            "(name==a,name==b);controllerid!=c",
+        );
+        same_sql("name==a  or\n name==b", "name==a,name==b");
+        same_sql(
+            "updatestatus=in=( pending , error )",
+            "updatestatus=in=(pending,error)",
+        );
+    }
+
+    #[test]
+    fn keywords_are_words_only_between_whitespace() {
+        // Inside a value or selector, `and` / `or` are just letters.
+        let clause = to_sql("name==sandor", &target_map(), 0).unwrap();
+        assert_eq!(clause.binds, vec![Value::Text("sandor".into())]);
+        let clause = to_sql("name==or", &target_map(), 0).unwrap();
+        assert_eq!(clause.binds, vec![Value::Text("or".into())]);
+        let clause = to_sql("name=='rock and roll'", &target_map(), 0).unwrap();
+        assert_eq!(clause.binds, vec![Value::Text("rock and roll".into())]);
+    }
+
+    #[test]
+    fn a_stray_word_is_refused_not_matched() {
+        for query in [
+            // hawkBit's keywords are lowercase only.
+            "name==a OR name==b",
+            "name==a AND name==b",
+            "name==a && name==b",
+            // An unquoted value ends at whitespace.
+            "name==rock and roll",
+            "name==a b",
+            // Dangling keywords.
+            "name==a or",
+            "name==a and ",
+            "or name==a",
+            // Whitespace around an operator is still refused.
+            "name ==a",
+            "name== a",
+        ] {
+            assert!(
+                to_sql(query, &target_map(), 0).is_err(),
+                "{query:?} must be a 400"
+            );
+        }
     }
 }

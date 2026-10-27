@@ -1996,7 +1996,8 @@ async fn clear_search_history(State(state): State<AppState>, headers: HeaderMap)
     Redirect::to("/search").into_response()
 }
 
-/// `field==*needle*,field2==*needle*` — OR across a resource's text fields.
+/// `field=="*needle*",field2=="*needle*"` — OR across a resource's text fields.
+/// Quoted: a needle with spaces or the words `and`/`or` stays text.
 fn search_query(resource: &Resource, needle: &str) -> Option<String> {
     if needle.is_empty() || resource.search_fields.is_empty() {
         return None;
@@ -2005,7 +2006,7 @@ fn search_query(resource: &Resource, needle: &str) -> Option<String> {
         resource
             .search_fields
             .iter()
-            .map(|field| format!("{field}==*{needle}*"))
+            .map(|field| format!("{field}==\"*{needle}*\""))
             .collect::<Vec<_>>()
             .join(","),
     )
