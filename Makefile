@@ -14,7 +14,7 @@ ENGINE ?= $(DEFAULT_ENGINE)
 COMPOSE ?= $(ENGINE) compose -f deploy/docker-compose.yml
 ARGS ?=
 
-.PHONY: all check-tools fmt lint test build run run-ui device it it-keep ui-audit reset-ui-state gc gc-dry gc-auto docker up scale down logs ps clean deploy-list e2e-image e2e FORCE
+.PHONY: all check-tools fmt lint test build run run-ui device it it-keep ui-audit reset-ui-state gc gc-dry gc-auto docker up scale down logs ps clean deploy-list e2e-image e2e screenshots FORCE
 
 all: check-tools lint test build
 
@@ -28,8 +28,9 @@ fmt:
 
 lint:
 	@# The repository is English-only. The pattern is the Cyrillic block written
-	@# as escapes, so this line never matches itself.
-	@! git grep --untracked -nP '[\x{0400}-\x{04FF}]' || { echo "Cyrillic found (above): the repository is English-only"; exit 1; }
+	@# as escapes, so this line never matches itself. -I skips binary files:
+	@# they hold no text, and the bytes of a PNG match the pattern by chance.
+	@! git grep --untracked -I -nP '[\x{0400}-\x{04FF}]' || { echo "Cyrillic found (above): the repository is English-only"; exit 1; }
 	cargo fmt --all --check
 	cargo clippy --workspace --all-targets -- -D warnings
 	# --all-targets honours `test = false` (apps/*/Cargo.toml), so the two
@@ -40,7 +41,8 @@ lint:
 	cargo clippy -p hawier-ui --test it -- -D warnings
 	@command -v shellcheck >/dev/null || { echo "shellcheck is required: make lint checks the e2e harness"; exit 1; }
 	shellcheck -x e2e/*.sh e2e/scenarios/*.sh e2e/br2-external/board/hawier-qemu/*.sh \
-		e2e/br2-external/board/hawier-qemu/rootfs-overlay/etc/init.d/*
+		e2e/br2-external/board/hawier-qemu/rootfs-overlay/etc/init.d/* \
+		scripts/screenshots.sh
 
 test: gc-auto
 	cargo test --workspace
@@ -85,6 +87,14 @@ load:
 # INTERVAL, DURATION_S — e.g. COUNT=5000 INTERVAL=500ms make load-poll
 load-poll:
 	bash scripts/load_poll.sh
+
+# README screenshots (spec: build-tooling, "Console screenshots"): a stand of
+# its own on loopback, demo data, a pinned headless browser in a container.
+# Writes docs/assets/screenshots/ only when every page rendered. Nothing
+# depends on it — the browser image is pulled only here.
+screenshots: ext
+	cargo build -p hawier-server -p hawier-ui -p hawier-client
+	ENGINE=$(ENGINE) bash scripts/screenshots.sh
 
 # `up -d` returns as soon as the container starts, not when Postgres accepts
 # connections. `make it` stops Postgres when it finishes, so two runs in a row
