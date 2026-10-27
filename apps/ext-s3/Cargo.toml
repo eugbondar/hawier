@@ -2,7 +2,7 @@
 name = "hawier-ext-s3"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 
 [lib]
 name = "hawier_ext_s3"

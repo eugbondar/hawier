@@ -88,3 +88,10 @@ compatibility holds for the development stage; details in
   per capability
 - [ARCHITECTURE.md](ARCHITECTURE.md) and [EXTENSIONS.md](EXTENSIONS.md) —
   why it is built this way
+
+## License
+
+MIT with the Commons Clause ([LICENSE](LICENSE)): install it, run it for your
+own devices, modify it and share your changes — but you may not sell hawier,
+or a hosting or support service whose value comes from it. The hawkBit SQL
+migrations in `apps/server/migrations/hawkbit/` stay under EPL-2.0.

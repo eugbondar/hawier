@@ -2,7 +2,7 @@
 name = "hawier-ext-rollout-classic"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file.workspace = true
 
 [lib]
 name = "hawier_ext_rollout_classic"
