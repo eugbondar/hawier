@@ -42,7 +42,9 @@ lint:
 	@command -v shellcheck >/dev/null || { echo "shellcheck is required: make lint checks the e2e harness"; exit 1; }
 	shellcheck -x e2e/*.sh e2e/scenarios/*.sh e2e/br2-external/board/hawier-qemu/*.sh \
 		e2e/br2-external/board/hawier-qemu/rootfs-overlay/etc/init.d/* \
-		scripts/screenshots.sh
+		scripts/screenshots.sh scripts/doc_links.sh
+	# Relative links in README.md and docs/ resolve (spec: repository-docs).
+	bash scripts/doc_links.sh
 
 test: gc-auto
 	cargo test --workspace

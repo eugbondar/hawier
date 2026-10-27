@@ -46,5 +46,5 @@
   line by line, parsing of migration names); hawier writes the same rows into
   `schema_version` that Flyway would have written.
 - Canary: stock `hawkbit/hawkbit-update-server` must start on a
-  database migrated by hawier, without `flyway repair` (a manual step — see the
-  README; an automated test compares the `schema_version` rows).
+  database migrated by hawier, without `flyway repair` (a manual step — see
+  `docs/dev/hawkbit-compatibility.md`; an automated test compares the `schema_version` rows).

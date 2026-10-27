@@ -392,8 +392,8 @@ the server computes liveness from the tenant's polling configuration. The
 ## 5. Configuration and profiles
 
 Extensions are not in cargo features: they are separate `.wasm` files, and a
-node is configured by which of them it loads. The variables are in the README
-("Environment variables (server)"), the rules are in the `extension-host` spec.
+node is configured by which of them it loads. The variables are in
+[docs/dev/configuration.md](docs/dev/configuration.md), the rules are in the `extension-host` spec.
 
 An example of a node on file storage and webhooks:
 

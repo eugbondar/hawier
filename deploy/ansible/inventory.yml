@@ -8,7 +8,7 @@
 #   3. make creds-server        the console login, any time later.
 #
 # The server needs ssh, python3 and podman or docker with compose; nothing
-# else, not even internet access (README, "Deployment"). Preflight refuses a
+# else, not even internet access (docs/dev/deployment.md). Preflight refuses a
 # host whose address is still an example.com placeholder.
 #
 # Required per host: ansible_host, ansible_user, and hawier_node_id (unique
@@ -37,7 +37,7 @@ all:
           # No proxy in front: the console (8088) and the device API (8080)
           # listen on every interface. Fine for a first look; before real
           # devices, turn on TLS (the next example) — see the X-Forwarded-For
-          # note in the README.
+          # note in docs/dev/deployment.md.
           hawier_publish_server: "0.0.0.0:8080"
           hawier_publish_ui: "0.0.0.0:8088"
 
@@ -70,7 +70,7 @@ all:
 
         # Behind your own TLS proxy: nothing listens on a public interface,
         # and the proxy must set X-Forwarded-Proto and overwrite
-        # X-Forwarded-For (see README, "Deployment").
+        # X-Forwarded-For (see docs/dev/deployment.md).
         # behind-proxy:
         #   ansible_host: 192.0.2.10
         #   ansible_user: deploy

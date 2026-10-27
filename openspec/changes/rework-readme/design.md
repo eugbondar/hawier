@@ -52,7 +52,7 @@ a loopback port, `trap cleanup EXIT`, bounded `wait_for`.
 
 | Old README section | Goes to |
 |---|---|
-| Compatibility blockquote | one sentence in the README "Why hawier"; details stay in `ARCHITECTURE.md` and spec `database-schema` |
+| Compatibility blockquote | the README "Migrating from hawkBit" paragraph; details stay in `ARCHITECTURE.md` and spec `database-schema` |
 | Components table | `docs/dev/README.md` (repository layout) |
 | Quick start | stays in the README, trimmed to `make up` + addresses + credentials + one simulator line |
 | Make targets table | `docs/dev/make.md` |

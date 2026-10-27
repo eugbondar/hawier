@@ -5,7 +5,7 @@
 //! TEMPORARY (dev stage): hawier keeps writing Flyway-shaped history rows so
 //! a stock hawkBit 1.0.x can still boot against the same database without a
 //! `flyway repair`. Verify once against a stock hawkbit-update-server boot
-//! when registry access is available (see README "DB compatibility").
+//! when registry access is available (see docs/dev/hawkbit-compatibility.md).
 
 /// CRC32 (IEEE) — matches `java.util.zip.CRC32` used by Flyway.
 fn crc32(data_lines: impl Iterator<Item = impl AsRef<[u8]>>) -> u32 {

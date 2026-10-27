@@ -234,7 +234,7 @@ Both traces were thrown away, and it cost hours:
 2. Record the conditions: `uptime` (load average), fleet size before the run,
    what else is running on the machine.
 3. Three runs per configuration, the median goes into the CSV, the spread goes here.
-4. The regression threshold is 20% at the **same** parameters (README, CLAUDE.md).
+4. The regression threshold is 20% at the **same** parameters (spec `load-benchmark`, CLAUDE.md).
 
 ## Measurements
 

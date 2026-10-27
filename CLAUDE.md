@@ -62,7 +62,7 @@ brings up Postgres from deploy/docker-compose.yml) / `make run` (server) /
 `make run-ui` / `make device ARGS="..."` / `make load` (load run) /
 `make deploy-<host>` (deploy to a host from `deploy/ansible/inventory.yml`;
 `make deploy-list` — which ones exist) / `make logs-<host>` (what is going on
-there) / `make creds-<host>` (what to log in with). Full list — README.
+there) / `make creds-<host>` (what to log in with). Full list — `docs/dev/make.md`.
 
 What the build, deploy, TLS and measurements do — specs `build-tooling`,
 `remote-deployment`, `tls-proxy`, `load-benchmark`, `build-identity`. Below

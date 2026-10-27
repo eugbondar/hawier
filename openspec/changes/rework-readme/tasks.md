@@ -13,19 +13,19 @@
 
 ## 2. Logo
 
-- [ ] 2.1 Draw `docs/assets/logo-light.svg` and `docs/assets/logo-dark.svg` per design §3 (square mark with chevron, rectilinear wordmark, palette colours only, no `<text>`, under 4 KB each); verify by opening both in the browser pane on a white and on a `#0d1117` background and checking legibility at 120 px and 32 px height
+- [x] 2.1 Draw `docs/assets/logo-light.svg` and `docs/assets/logo-dark.svg` per design §3 (square mark with chevron, rectilinear wordmark, palette colours only, no `<text>`, under 4 KB each); verify by opening both in the browser pane on a white and on a `#0d1117` background and checking legibility at 120 px and 32 px height
 
 ## 3. docs/dev pages
 
-- [ ] 3.1 Create `docs/dev/README.md` (index + repository layout from the old Components table) and `docs/dev/make.md` (the make-target table, the proxy note for image pulls/builds); verify every target in spec `build-tooling` appears in `make.md`
-- [ ] 3.2 Create `docs/dev/configuration.md` (server and console environment variables, the extension parameters file rules, links to `extension-host`, `tenant-configuration`, `incidents`), replacing archived-design item references with plain statements; verify every `HAWIER_*` variable from the old README is present
-- [ ] 3.3 Create `docs/dev/simulator.md`, `docs/dev/load-testing.md` and `docs/dev/e2e.md` (no budget table, no type-compatibility note, link to `reference-device-image` for limits); verify every load-run variable and e2e scenario from the old README is present
-- [ ] 3.4 Create `docs/dev/deployment.md` (inventory, preflight, what the deploy does, secrets, diagnostics, rollback, engines, TLS, the pre-production checklist, scaling demo) and `docs/dev/extensions.md` (module table, run example), `docs/dev/hawkbit-compatibility.md` (Flyway history, baseline, `hawier_*` tables); verify by diffing the old README section by section against design §1 that nothing kept is missing
+- [x] 3.1 Create `docs/dev/README.md` (index + repository layout from the old Components table) and `docs/dev/make.md` (the make-target table, the proxy note for image pulls/builds); verify every target in spec `build-tooling` appears in `make.md`
+- [x] 3.2 Create `docs/dev/configuration.md` (server and console environment variables, the extension parameters file rules, links to `extension-host`, `tenant-configuration`, `incidents`), replacing archived-design item references with plain statements; verify every `HAWIER_*` variable from the old README is present
+- [x] 3.3 Create `docs/dev/simulator.md`, `docs/dev/load-testing.md` and `docs/dev/e2e.md` (no budget table, no type-compatibility note, link to `reference-device-image` for limits); verify every load-run variable and e2e scenario from the old README is present
+- [x] 3.4 Create `docs/dev/deployment.md` (inventory, preflight, what the deploy does, secrets, diagnostics, rollback, engines, TLS, the pre-production checklist, scaling demo) and `docs/dev/extensions.md` (module table, run example), `docs/dev/hawkbit-compatibility.md` (Flyway history, baseline, `hawier_*` tables); verify by diffing the old README section by section against design §1 that nothing kept is missing
 
 ## 4. README and references (commit 2)
 
-- [ ] 4.1 Rewrite `README.md` per design §2 and spec `repository-docs`: `<picture>` logo header, one-liner, hero + table of screenshots, what it does, quick start, two-step deploy, migrating from hawkBit, documentation links; no reference tables; only SWUpdate named as verified; verify it is under 120 lines and has no make/env table (`grep -c '^| `' README.md` near zero)
-- [ ] 4.2 Write `scripts/doc_links.sh` per design §5 and call it from `make lint`; verify it passes on the new tree and fails naming file, line and target when a link in `README.md` is pointed at `docs/dev/nope.md`
-- [ ] 4.3 Repoint references per design §6 (`CLAUDE.md`, `apps/server/src/db/flyway.rs`, `EXTENSIONS.md`, `SCHEMA_NOTES.md`, `bench/NOTES.md`, `deploy/ansible/inventory.yml`); verify `git grep -n 'README' -- ':!openspec/changes/archive' ':!docs'` shows no pointer at a removed README section
-- [ ] 4.4 Preview the README rendering locally (a scratch HTML page with the same `<picture>` and images, light and dark) in the browser pane; verify the logo switches with the colour scheme and screenshots appear before the first command block
-- [ ] 4.5 `make lint` and `openspec validate rework-readme --strict`, then commit logo, `docs/dev/`, README, link check and repointed references as one slice with a message explaining the split between landing page and `docs/dev/`
+- [x] 4.1 Rewrite `README.md` per design §2 and spec `repository-docs`: `<picture>` logo header, one-liner, hero + table of screenshots, what it does, quick start, two-step deploy, migrating from hawkBit, documentation links; no reference tables; only SWUpdate named as verified; verify it is under 120 lines and has no make/env table (`grep -c '^| `' README.md` near zero)
+- [x] 4.2 Write `scripts/doc_links.sh` per design §5 and call it from `make lint`; verify it passes on the new tree and fails naming file, line and target when a link in `README.md` is pointed at `docs/dev/nope.md`
+- [x] 4.3 Repoint references per design §6 (`CLAUDE.md`, `apps/server/src/db/flyway.rs`, `EXTENSIONS.md`, `SCHEMA_NOTES.md`, `bench/NOTES.md`, `deploy/ansible/inventory.yml`); verify `git grep -n 'README' -- ':!openspec/changes/archive' ':!docs'` shows no pointer at a removed README section
+- [x] 4.4 Preview the README rendering locally (a scratch HTML page with the same `<picture>` and images, light and dark) in the browser pane; verify the logo switches with the colour scheme and screenshots appear before the first command block
+- [x] 4.5 `make lint` and `openspec validate rework-readme --strict`, then commit logo, `docs/dev/`, README, link check and repointed references as one slice with a message explaining the split between landing page and `docs/dev/`
