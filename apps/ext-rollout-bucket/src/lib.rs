@@ -167,14 +167,15 @@ fn plan(input: &RolloutPlanInput) -> GroupPlan {
 }
 
 /// Same arithmetic as the classic strategy: a wave that meets its success
-/// threshold is done, one that meets its error threshold stops everything.
+/// threshold lets the next one start, one that meets its error threshold
+/// stops everything.
 /// The difference between the two strategies is how the fleet is divided,
 /// not what counts as success.
 fn evaluate(stats: &RolloutStats) -> RolloutVerdict {
     let mut verdict = RolloutVerdict::default();
     for group in &stats.groups {
         if group.total == 0 {
-            verdict.finished.push(group.id.clone());
+            verdict.succeeded.push(group.id.clone());
             continue;
         }
         if let Some(threshold) = group.error_threshold {
@@ -187,7 +188,7 @@ fn evaluate(stats: &RolloutStats) -> RolloutVerdict {
         }
         let share = group.finished as f64 * 100.0 / group.total as f64;
         if share >= group.success_threshold {
-            verdict.finished.push(group.id.clone());
+            verdict.succeeded.push(group.id.clone());
         }
     }
     verdict

@@ -586,6 +586,239 @@ async fn dynamic_rollout_absorbs_a_late_device() {
 }
 
 // ---------------------------------------------------------------------------
+// Success starts the next group; settling finishes it (rollout-engine spec,
+// "Evaluation and advance"). hawkBit 1.0's semantics.
+// ---------------------------------------------------------------------------
+
+/// Create `<prefix>-fleet` over the targets `<prefix>-*`, with explicit
+/// thresholds.
+async fn create_rollout(
+    api: &Api,
+    prefix: &str,
+    ds_id: i64,
+    groups: i64,
+    success: &str,
+    error: &str,
+    dynamic: bool,
+) -> i64 {
+    let (status, rollout) = api
+        .post(
+            "/rest/v1/rollouts",
+            &json!({
+                "name": format!("{prefix}-fleet"),
+                "distributionSetId": ds_id,
+                "targetFilterQuery": format!("controllerid=={prefix}-*"),
+                "amountGroups": groups,
+                "successCondition": { "condition": "THRESHOLD", "expression": success },
+                "errorCondition": { "condition": "THRESHOLD", "expression": error },
+                "type": "forced",
+                "dynamic": dynamic,
+            }),
+        )
+        .await;
+    assert_eq!(status, 201, "rollout create failed: {rollout}");
+    rollout["id"].as_i64().unwrap()
+}
+
+/// Group statuses in id order.
+async fn group_statuses(server: &common::TestServer, rollout_id: i64) -> Vec<i32> {
+    sqlx::query_scalar("SELECT status FROM sp_rollout_group WHERE rollout = $1 ORDER BY id")
+        .bind(rollout_id)
+        .fetch_all(&server.state.pool)
+        .await
+        .unwrap()
+}
+
+/// Controller ids per group, groups in id order.
+async fn members_per_group(server: &common::TestServer, rollout_id: i64) -> Vec<Vec<String>> {
+    let rows = sqlx::query(
+        "SELECT g.id, t.controller_id FROM sp_rollout_target_group l
+         JOIN sp_rollout_group g ON g.id = l.rollout_group
+         JOIN sp_target t ON t.id = l.target
+         WHERE g.rollout = $1 ORDER BY g.id, t.controller_id",
+    )
+    .bind(rollout_id)
+    .fetch_all(&server.state.pool)
+    .await
+    .unwrap();
+    let mut groups: Vec<(i64, Vec<String>)> = Vec::new();
+    for row in &rows {
+        let id: i64 = row.get("id");
+        if groups.last().map(|(g, _)| *g) != Some(id) {
+            groups.push((id, Vec::new()));
+        }
+        groups.last_mut().unwrap().1.push(row.get("controller_id"));
+    }
+    groups.into_iter().map(|(_, members)| members).collect()
+}
+
+/// The report this was found by: 42 targets, 3 groups, a 50% success
+/// threshold, 6 devices that never poll. The rollout went FINISHED with 6
+/// actions still running and every group "finished".
+#[tokio::test]
+#[ignore]
+async fn devices_that_never_poll_keep_the_rollout_running() {
+    let server = common::spawn().await;
+    let api = Api::new(&server.base_url);
+    let mut targets = Vec::new();
+    for n in 0..42 {
+        targets.push(common::seed_target(&server, "DEFAULT", &format!("half-{n:02}")).await);
+    }
+    let ds = common::seed_ds_with_artifact(&server, "DEFAULT", "half-fw", b"half").await;
+    let rollout_id = create_rollout(&api, "half", ds.ds_id, 3, "50", "50", false).await;
+    tick(&server).await; // materialize
+    api.post(&format!("/rest/v1/rollouts/{rollout_id}/start"), &json!({}))
+        .await;
+    tick(&server).await; // group 1 runs
+
+    // Two silent devices in each group, so every group is past 50% but none
+    // has settled.
+    let groups = members_per_group(&server, rollout_id).await;
+    assert_eq!(groups.len(), 3);
+    let silent: Vec<String> = groups.iter().flat_map(|g| g[..2].to_vec()).collect();
+    assert_eq!(silent.len(), 6);
+
+    for _ in 0..4 {
+        for target in targets
+            .iter()
+            .filter(|t| !silent.contains(&t.controller_id))
+        {
+            run_device_once(&server, target).await;
+        }
+        tick(&server).await;
+    }
+
+    let detail = api.get(&format!("/rest/v1/rollouts/{rollout_id}")).await;
+    assert_eq!(detail["status"], "running", "{detail}");
+    assert_eq!(detail["totalTargetsPerStatus"]["finished"], 36, "{detail}");
+    assert_eq!(detail["totalTargetsPerStatus"]["running"], 6, "{detail}");
+    // All three past their threshold, all three still waiting for someone.
+    assert_eq!(
+        group_statuses(&server, rollout_id).await,
+        vec![RolloutGroupStatus::Running.code(); 3]
+    );
+
+    // The stragglers turn up: now everything settles.
+    for target in targets.iter().filter(|t| silent.contains(&t.controller_id)) {
+        assert_eq!(
+            run_device_once(&server, target).await,
+            CycleOutcome::UpdatedSuccessfully
+        );
+    }
+    tick(&server).await;
+    assert_eq!(
+        group_statuses(&server, rollout_id).await,
+        vec![RolloutGroupStatus::Finished.code(); 3]
+    );
+    let detail = api.get(&format!("/rest/v1/rollouts/{rollout_id}")).await;
+    assert_eq!(detail["status"], "finished", "{detail}");
+    assert_eq!(detail["totalTargetsPerStatus"]["finished"], 42, "{detail}");
+}
+
+/// A group with nothing left to wait for is finished even below its success
+/// threshold; otherwise the rollout would never move on.
+#[tokio::test]
+#[ignore]
+async fn a_settled_group_finishes_below_its_threshold() {
+    let server = common::spawn().await;
+    let api = Api::new(&server.base_url);
+    let mut targets = Vec::new();
+    for n in 0..4 {
+        targets.push(common::seed_target(&server, "DEFAULT", &format!("settle-{n}")).await);
+    }
+    let ds = common::seed_ds_with_artifact(&server, "DEFAULT", "settle-fw", b"settle").await;
+    let rollout_id = create_rollout(&api, "settle", ds.ds_id, 2, "100", "80", false).await;
+    tick(&server).await;
+    api.post(&format!("/rest/v1/rollouts/{rollout_id}/start"), &json!({}))
+        .await;
+    tick(&server).await;
+
+    // Group 1: one success, one failure. 50% is short of the success
+    // threshold and short of the error threshold.
+    let groups = members_per_group(&server, rollout_id).await;
+    let target = |id: &str| targets.iter().find(|t| t.controller_id == id).unwrap();
+    assert_eq!(
+        run_device_once(&server, target(&groups[0][0])).await,
+        CycleOutcome::UpdatedSuccessfully
+    );
+    let failing = target(&groups[0][1]);
+    let mut device = Device::new(
+        DdiClient::new(
+            server.base_url.clone(),
+            "DEFAULT",
+            failing.controller_id.clone(),
+            DdiAuth::TargetToken(failing.token.clone()),
+        ),
+        DeviceOptions {
+            once: true,
+            fail_download: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(device.cycle().await.unwrap(), CycleOutcome::UpdateFailed);
+
+    tick(&server).await;
+    assert_eq!(
+        group_statuses(&server, rollout_id).await,
+        vec![
+            RolloutGroupStatus::Finished.code(),
+            RolloutGroupStatus::Running.code()
+        ]
+    );
+    assert_eq!(
+        rollout_status(&server, rollout_id).await,
+        RolloutStatus::Running.code()
+    );
+}
+
+/// A device of the last group that never polls must not keep newcomers out
+/// of a dynamic rollout: the last group's success is what lets them in.
+#[tokio::test]
+#[ignore]
+async fn a_dynamic_rollout_grows_past_a_straggler() {
+    let server = common::spawn().await;
+    let api = Api::new(&server.base_url);
+    let first = common::seed_target(&server, "DEFAULT", "strag-a").await;
+    let _silent = common::seed_target(&server, "DEFAULT", "strag-b").await;
+    let ds = common::seed_ds_with_artifact(&server, "DEFAULT", "strag-fw", b"strag").await;
+    let rollout_id = create_rollout(&api, "strag", ds.ds_id, 1, "50", "50", true).await;
+    tick(&server).await;
+    api.post(&format!("/rest/v1/rollouts/{rollout_id}/start"), &json!({}))
+        .await;
+    tick(&server).await;
+    assert_eq!(
+        run_device_once(&server, &first).await,
+        CycleOutcome::UpdatedSuccessfully
+    );
+    tick(&server).await;
+
+    let late = common::seed_target(&server, "DEFAULT", "strag-c").await;
+    tick(&server).await;
+
+    let dynamic: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sp_rollout_group WHERE rollout = $1 AND is_dynamic = TRUE",
+    )
+    .bind(rollout_id)
+    .fetch_all(&server.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(dynamic, vec!["strag-fleet-dynamic-1"]);
+    assert_eq!(
+        run_device_once(&server, &late).await,
+        CycleOutcome::UpdatedSuccessfully
+    );
+    // The static group still waits for strag-b.
+    assert_eq!(
+        group_statuses(&server, rollout_id).await[0],
+        RolloutGroupStatus::Running.code()
+    );
+    assert_eq!(
+        rollout_status(&server, rollout_id).await,
+        RolloutStatus::Running.code()
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Target type compatibility (rollout-engine spec)
 // ---------------------------------------------------------------------------
 

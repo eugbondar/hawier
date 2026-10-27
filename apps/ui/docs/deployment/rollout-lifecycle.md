@@ -7,7 +7,7 @@
 1. **Creating.** The rollout is counting the devices its query matches and dividing them into groups. Nothing has been sent.
 2. **Ready** — or **waiting for approval**, if the tenant requires a second pair of eyes.
 3. **Starting.** Jobs are created for every group. The first group is activated; the rest are [scheduled](/help/glossary#scheduled) and invisible to their devices.
-4. **Running.** Groups advance one after another as each meets its success threshold.
+4. **Running.** Groups advance one after another: a group that meets its success threshold activates the next one, and keeps running itself until its last device reports.
 5. **Finished**, or **paused**, or **stopped**.
 
 ## Start {#start}

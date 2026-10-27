@@ -12,7 +12,7 @@ Note that **running** is green and **pending** is amber: work in progress is nor
 
 Done, successfully.
 
-On an **action**, the device reported that it installed the update. On a **rollout** or a **deploy group**, every device it was responsible for reached a final state and the success threshold was met.
+On an **action**, the device reported that it installed the update. On a **rollout** or a **deploy group**, every device it was responsible for reached a final state. Meeting a success threshold only starts the next group; it does not finish anything.
 
 ## error {#error}
 

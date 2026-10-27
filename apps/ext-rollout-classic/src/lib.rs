@@ -9,8 +9,11 @@
 //!
 //! - each group takes a percentage of what earlier groups **left**, the last
 //!   one taking the remainder — hawkBit's own arithmetic;
-//! - a group is finished when the share of its targets that installed
-//!   successfully reaches its success threshold;
+//! - a group meets its success condition when the share of its targets that
+//!   installed successfully reaches its success threshold. That starts the
+//!   next group and nothing else: the group is finished when none of its
+//!   actions is still active, which the engine sees for itself, as hawkBit
+//!   does. A rollout with a device that never polls stays running;
 //! - a group has failed when the share that errored reaches its error
 //!   threshold, and that pauses the rollout;
 //! - the per-group `targetFilterQuery` is **ignored**, exactly as before.
@@ -112,9 +115,9 @@ fn evaluate(stats: &RolloutStats) -> RolloutVerdict {
     let mut verdict = RolloutVerdict::default();
     for group in &stats.groups {
         if group.total == 0 {
-            // An empty group is done; otherwise a rollout with one would
-            // never advance past it.
-            verdict.finished.push(group.id.clone());
+            // An empty group has succeeded; otherwise a rollout with one
+            // would never advance past it.
+            verdict.succeeded.push(group.id.clone());
             continue;
         }
         if let Some(threshold) = group.error_threshold {
@@ -127,7 +130,7 @@ fn evaluate(stats: &RolloutStats) -> RolloutVerdict {
         }
         let share = group.finished as f64 * 100.0 / group.total as f64;
         if share >= group.success_threshold {
-            verdict.finished.push(group.id.clone());
+            verdict.succeeded.push(group.id.clone());
         }
     }
     verdict
@@ -206,16 +209,16 @@ mod tests {
     }
 
     #[test]
-    fn a_group_is_finished_at_its_success_threshold() {
+    fn a_group_succeeds_at_its_success_threshold() {
         let verdict = evaluate(&stats(vec![group("1", 10, 10, 0)]));
-        assert_eq!(verdict.finished, vec!["1".to_string()]);
+        assert_eq!(verdict.succeeded, vec!["1".to_string()]);
         assert!(verdict.pause.is_none());
     }
 
     #[test]
     fn short_of_the_threshold_it_keeps_running() {
         let verdict = evaluate(&stats(vec![group("1", 10, 9, 0)]));
-        assert!(verdict.finished.is_empty());
+        assert!(verdict.succeeded.is_empty());
         assert!(verdict.errored.is_empty());
     }
 
@@ -234,8 +237,20 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_group_is_finished_rather_than_stuck() {
+    fn an_empty_group_succeeds_rather_than_stuck() {
         let verdict = evaluate(&stats(vec![group("1", 0, 0, 0)]));
-        assert_eq!(verdict.finished, vec!["1".to_string()]);
+        assert_eq!(verdict.succeeded, vec!["1".to_string()]);
+    }
+
+    #[test]
+    fn a_threshold_met_with_stragglers_is_success_and_nothing_else() {
+        // Half done, half still running: enough to start the next group.
+        // Whether this one is finished is not the module's to say.
+        let mut half = group("1", 10, 5, 0);
+        half.success_threshold = 50.0;
+        let verdict = evaluate(&stats(vec![half]));
+        assert_eq!(verdict.succeeded, vec!["1".to_string()]);
+        assert!(verdict.errored.is_empty());
+        assert!(verdict.pause.is_none());
     }
 }

@@ -24,7 +24,7 @@ The devices find out at their next poll.
 
 Both are percentages of the group's own device count, not of the whole rollout.
 
-Success threshold :: How much of the group must finish before the next group is activated. 100 means everybody; 90 means the rollout carries on with a tenth of the wave still outstanding.
+Success threshold :: How much of the group must finish before the next group is activated. 100 means everybody; 90 means the next group starts with a tenth of this one still outstanding. Meeting it does not finish the group: the group stays [running](/help/glossary#running) until its remaining devices report, or their jobs are cancelled.
 Error threshold :: How much of the group may fail before the rollout stops. Reaching it puts the group into [error](/help/glossary#error) and [pauses](/help/glossary#paused) the whole rollout.
 
 Devices that have [downloaded](/help/glossary#downloaded) count towards success as well as those that have finished, which is what makes a download-only rollout able to complete at all.
@@ -33,7 +33,7 @@ A group with no devices is finished immediately. Otherwise a query that matched 
 
 ## Choosing the numbers {#choosing-thresholds}
 
-A success threshold of 100 means one permanently offline device stops the rollout. That is usually not what you want: 90 or 95 lets the wave complete and leaves the stragglers to be dealt with afterwards, from the [pending update](/help/inventory/targets#pending-update) list.
+A success threshold of 100 means one permanently offline device stops the rollout. That is usually not what you want: 90 or 95 lets the next group start and leaves the stragglers to be dealt with from the [pending update](/help/inventory/targets#pending-update) list. Until they report, or their jobs are cancelled, their group and the rollout stay running: a rollout is finished only when nothing in it is still waiting for a device.
 
 An error threshold that is too generous defeats the purpose. If you would abandon the rollout after five failures in a hundred, the threshold is 5.
 
@@ -42,8 +42,8 @@ An error threshold that is too generous defeats the purpose. If you would abando
 [creating](/help/glossary#creating) :: Being built.
 [ready](/help/glossary#ready) :: Built; its devices are known.
 [scheduled](/help/glossary#scheduled) :: Its jobs exist and are invisible to their devices.
-[running](/help/glossary#running) :: Activated; its devices can see their jobs.
-[finished](/help/glossary#finished) :: Met its success threshold.
+[running](/help/glossary#running) :: Activated; its devices can see their jobs. More than one group can be running: a group that met its success threshold keeps running until its last devices report.
+[finished](/help/glossary#finished) :: Every one of its devices reached a final state: finished, error or cancelled. This can happen below the success threshold, when the failures stayed under the error threshold; the rollout then moves on.
 [error](/help/glossary#error) :: Met its error threshold, and paused the rollout.
 
 ## Per-group filters {#per-group-filters}

@@ -662,9 +662,14 @@ pub struct RolloutStats {
 /// strategy cannot leave a rollout in a state the engine does not know.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RolloutVerdict {
-    /// Groups that have met their success condition.
-    #[serde(default)]
-    pub finished: Vec<String>,
+    /// Groups that have met their success condition. This starts the group
+    /// after each of them; it does not finish them. A group is finished when
+    /// none of its actions is still active, which the host sees for itself —
+    /// hawkBit's semantics. The old name, `finished`, invited reading it as
+    /// "these are done", and a rollout went FINISHED with devices still
+    /// updating; a module built against it is still understood.
+    #[serde(default, alias = "finished")]
+    pub succeeded: Vec<String>,
     /// Groups that have met their error condition.
     #[serde(default)]
     pub errored: Vec<String>,

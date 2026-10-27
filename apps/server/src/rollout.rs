@@ -939,9 +939,6 @@ async fn evaluate_rollout(state: &AppState, tenant: &str, rollout_id: i64) -> Ap
         return Ok(());
     };
 
-    for group in &verdict.finished {
-        set_group_status(&mut tx, group, RolloutGroupStatus::Finished).await?;
-    }
     for group in &verdict.errored {
         set_group_status(&mut tx, group, RolloutGroupStatus::Error).await?;
     }
@@ -970,8 +967,107 @@ async fn evaluate_rollout(state: &AppState, tenant: &str, rollout_id: i64) -> Ap
         return Ok(());
     }
 
+    // Success starts the next group and leaves this one running: it is
+    // finished only once its stragglers settle, below. Treating the two as
+    // one put rollouts into FINISHED with devices still updating.
+    for group in &verdict.succeeded {
+        if !verdict.errored.contains(group) {
+            start_successor(&mut tx, tenant, &rollout, group).await?;
+        }
+    }
+    finish_settled_groups(&mut tx, tenant, &rollout).await?;
+
     advance_rollout(&mut tx, &state.incidents, tenant, &rollout).await?;
     tx.commit().await?;
+    Ok(())
+}
+
+/// hawkBit's NEXTGROUP success action: start the group after `group_id`, if
+/// it is still waiting. Groups are created in order, so "after" is the next
+/// id. A group that has no successor is the last one, and in a dynamic
+/// rollout its success is what lets newcomers in — otherwise one device of
+/// the last group that never polls would keep them out for good.
+///
+/// Idempotent: the same group succeeds again on every tick until it
+/// settles, and by then its successor is no longer SCHEDULED.
+async fn start_successor(
+    tx: &mut PgConnection,
+    tenant: &str,
+    rollout: &sqlx::postgres::PgRow,
+    group_id: &str,
+) -> AppResult<()> {
+    let id: i64 = group_id
+        .parse()
+        .map_err(|_| crate::error::AppError::Internal(anyhow::anyhow!("unusable group id")))?;
+    let rollout_id: i64 = rollout.get("id");
+    // Only a group of this rollout that is still running: the verdict
+    // applies to the state it was asked about, not to whatever it names.
+    let Some(row) = sqlx::query(
+        "SELECT n.id, n.status FROM sp_rollout_group g
+         LEFT JOIN LATERAL (
+             SELECT id, status FROM sp_rollout_group
+             WHERE rollout = g.rollout AND id > g.id ORDER BY id LIMIT 1
+         ) n ON TRUE
+         WHERE g.id = $1 AND g.rollout = $2 AND g.status = $3",
+    )
+    .bind(id)
+    .bind(rollout_id)
+    .bind(RolloutGroupStatus::Running.code())
+    .fetch_optional(&mut *tx)
+    .await?
+    else {
+        return Ok(());
+    };
+    match row.get::<Option<i64>, _>("id") {
+        Some(next) => {
+            if row.get::<Option<i32>, _>("status") == Some(RolloutGroupStatus::Scheduled.code()) {
+                activate_group(tx, tenant, next).await?;
+            }
+        }
+        None => {
+            if rollout
+                .get::<Option<bool>, _>("is_dynamic")
+                .unwrap_or(false)
+            {
+                grow_dynamic_group(tx, tenant, rollout).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A running group is finished when none of its actions is left to wait
+/// for — hawkBit's `isRolloutGroupComplete`, met threshold or not. A fact
+/// about rows the host owns, so it is not asked of the strategy: a module
+/// that could withhold it could keep a settled group running forever.
+async fn finish_settled_groups(
+    tx: &mut PgConnection,
+    tenant: &str,
+    rollout: &sqlx::postgres::PgRow,
+) -> AppResult<()> {
+    let mut terminal = vec![
+        ActionStatus::Finished.code(),
+        ActionStatus::Error.code(),
+        ActionStatus::Canceled.code(),
+    ];
+    // A download-only action is done once downloaded; a forced one is not.
+    if rollout.get::<i32, _>("action_type") == ActionType::DownloadOnly.code() {
+        terminal.push(ActionStatus::Downloaded.code());
+    }
+    sqlx::query(
+        "UPDATE sp_rollout_group g SET status = $1
+         WHERE g.rollout = $2 AND g.status = $3
+           AND NOT EXISTS (SELECT 1 FROM sp_action a
+               WHERE a.tenant = UPPER($4) AND a.rollout_group = g.id
+                 AND a.status <> ALL($5))",
+    )
+    .bind(RolloutGroupStatus::Finished.code())
+    .bind(rollout.get::<i64, _>("id"))
+    .bind(RolloutGroupStatus::Running.code())
+    .bind(tenant)
+    .bind(&terminal)
+    .execute(&mut *tx)
+    .await?;
     Ok(())
 }
 
