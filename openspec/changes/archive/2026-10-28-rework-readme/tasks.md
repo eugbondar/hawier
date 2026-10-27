@@ -9,7 +9,7 @@
 - [x] 1.5 Add the page list (overview, target list, a target with action history, the in-progress rollout, a distribution set) as one array, run the capture container (`--network=host`, `--user`, script read-only, output under `target/screenshots/`), enforce the 600 KB cap and promote into `docs/assets/screenshots/` only when every page succeeded; verify that forcing one path to a 404 fails the run and leaves the committed PNGs unchanged
 - [x] 1.6 Add the `screenshots` target to the root `Makefile` (depends on `ext`, builds server/ui/client, not a prerequisite of `all`/`build`) and add `scripts/screenshots.sh` to the `shellcheck` line of `lint`; verify `make lint` passes and `make -n all` does not mention `screenshots`
 - [x] 1.7 Run `make screenshots` with the compose stand up beside it; open each PNG and check it shows filled lists, no stray credentials and a sensible crop; verify the stand's own data is untouched and no node/console/container from the run remains
-- [ ] 1.8 `make lint`, then commit the harness and the first PNG set as one slice (stage only these files) with a message saying what the target does and why the pictures are generated
+- [x] 1.8 `make lint`, then commit the harness and the first PNG set as one slice (stage only these files) with a message saying what the target does and why the pictures are generated
 
 ## 2. Logo
 

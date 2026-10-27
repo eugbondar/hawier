@@ -39,6 +39,21 @@ The root Makefile SHALL provide these targets:
 - **WHEN** `README.md` links to `docs/dev/nope.md`, which does not exist
 - **THEN** `make lint` fails and names the file, the line and the target
 
+### Requirement: The repository is English-only
+`make lint` SHALL fail when any text file in the working tree that git tracks or would track (not ignored) contains a character from the Cyrillic block (U+0400–U+04FF), and SHALL print the offending lines. Specs, documentation, code comments and test data are all covered; input that has to be non-ASCII is written with escapes in code. Binary files (images, archives) hold no text and SHALL be skipped: their bytes can match the Cyrillic block by chance.
+
+#### Scenario: Cyrillic in a comment
+- **WHEN** a tracked source file gains a comment with Cyrillic text
+- **THEN** `make lint` fails and names the file and line
+
+#### Scenario: Clean tree
+- **WHEN** no tracked file contains Cyrillic
+- **THEN** this check passes and `make lint` continues with its other checks
+
+#### Scenario: A committed screenshot
+- **WHEN** a PNG under `docs/assets/` contains a byte sequence that decodes as a Cyrillic character
+- **THEN** the check ignores the file
+
 ## ADDED Requirements
 
 ### Requirement: Console screenshots
@@ -88,5 +103,5 @@ what it was waiting for.
 
 #### Scenario: Node never comes up
 - **WHEN** the harness node exits at startup
-- **THEN** the target fails after its bounded wait, saying it was waiting for
-  the node, and prints the tail of the node's log
+- **THEN** the target fails at once rather than at the end of its bounded
+  wait, saying the node exited, and prints the tail of the node's log
