@@ -27,7 +27,7 @@ Both are percentages of the group's own device count, not of the whole rollout.
 Success threshold :: How much of the group must finish before the next group is activated. 100 means everybody; 90 means the next group starts with a tenth of this one still outstanding. Meeting it does not finish the group: the group stays [running](/help/glossary#running) until its remaining devices report, or their jobs are cancelled.
 Error threshold :: How much of the group may fail before the rollout stops. Reaching it puts the group into [error](/help/glossary#error) and [pauses](/help/glossary#paused) the whole rollout.
 
-Devices that have [downloaded](/help/glossary#downloaded) count towards success as well as those that have finished, which is what makes a download-only rollout able to complete at all.
+In a download-only rollout, devices that have [downloaded](/help/glossary#downloaded) count towards success, since downloading is all such a rollout asks of them. In any other rollout they do not: a device that has downloaded but not installed — a soft update it is holding back, say — has not been updated yet, and the next group waits for it.
 
 A group with no devices is finished immediately. Otherwise a query that matched nothing would wedge the rollout forever.
 

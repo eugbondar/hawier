@@ -5,7 +5,7 @@
 
 use crate::common;
 
-use hawier_api::codes::{ActionType, RolloutGroupStatus, RolloutStatus};
+use hawier_api::codes::{ActionStatus, ActionType, RolloutGroupStatus, RolloutStatus};
 use hawier_client::{CycleOutcome, DdiAuth, DdiClient, Device, DeviceOptions};
 use serde_json::{json, Value};
 use sqlx::Row;
@@ -815,6 +815,150 @@ async fn a_dynamic_rollout_grows_past_a_straggler() {
     assert_eq!(
         rollout_status(&server, rollout_id).await,
         RolloutStatus::Running.code()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// What counts towards the success threshold: DOWNLOADED only where it ends
+// the job (rollout-engine spec, "Evaluation and advance"; hawkBit's
+// ThresholdRolloutGroupSuccessCondition).
+// ---------------------------------------------------------------------------
+
+/// A two-group rollout of `kind` over `<prefix>-*`, 100% success threshold.
+async fn create_typed_rollout(api: &Api, prefix: &str, ds_id: i64, kind: &str) -> i64 {
+    let (status, rollout) = api
+        .post(
+            "/rest/v1/rollouts",
+            &json!({
+                "name": format!("{prefix}-fleet"),
+                "distributionSetId": ds_id,
+                "targetFilterQuery": format!("controllerid=={prefix}-*"),
+                "amountGroups": 2,
+                "successCondition": { "condition": "THRESHOLD", "expression": "100" },
+                "errorCondition": { "condition": "THRESHOLD", "expression": "50" },
+                "type": kind,
+            }),
+        )
+        .await;
+    assert_eq!(status, 201, "rollout create failed: {rollout}");
+    rollout["id"].as_i64().unwrap()
+}
+
+/// The status of the one action `controller_id` has in this rollout.
+async fn action_status(server: &common::TestServer, rollout_id: i64, controller_id: &str) -> i32 {
+    sqlx::query_scalar(
+        "SELECT a.status FROM sp_action a JOIN sp_target t ON t.id = a.target
+         WHERE a.rollout = $1 AND t.controller_id = $2",
+    )
+    .bind(rollout_id)
+    .bind(controller_id)
+    .fetch_one(&server.state.pool)
+    .await
+    .unwrap()
+}
+
+/// A soft update the device has downloaded but deferred is not installed,
+/// so it must not start the next group.
+#[tokio::test]
+#[ignore]
+async fn downloaded_is_not_installed() {
+    let server = common::spawn().await;
+    let api = Api::new(&server.base_url);
+    let mut targets = Vec::new();
+    for n in 0..2 {
+        targets.push(common::seed_target(&server, "DEFAULT", &format!("defer-{n}")).await);
+    }
+    let ds = common::seed_ds_with_artifact(&server, "DEFAULT", "defer-fw", b"defer").await;
+    let rollout_id = create_typed_rollout(&api, "defer", ds.ds_id, "soft").await;
+    tick(&server).await;
+    api.post(&format!("/rest/v1/rollouts/{rollout_id}/start"), &json!({}))
+        .await;
+    tick(&server).await;
+
+    let groups = members_per_group(&server, rollout_id).await;
+    let first = targets
+        .iter()
+        .find(|t| t.controller_id == groups[0][0])
+        .unwrap();
+    let mut polite = Device::new(
+        DdiClient::new(
+            server.base_url.clone(),
+            "DEFAULT",
+            first.controller_id.clone(),
+            DdiAuth::TargetToken(first.token.clone()),
+        ),
+        DeviceOptions {
+            once: true,
+            defer_soft: true,
+            ..Default::default()
+        },
+    );
+    polite.cycle().await.unwrap();
+    assert_eq!(
+        action_status(&server, rollout_id, &first.controller_id).await,
+        ActionStatus::Downloaded.code()
+    );
+
+    tick(&server).await;
+    assert_eq!(
+        group_statuses(&server, rollout_id).await,
+        vec![
+            RolloutGroupStatus::Running.code(),
+            RolloutGroupStatus::Scheduled.code()
+        ]
+    );
+
+    // It installs after all: now the group has succeeded and settled.
+    assert_eq!(
+        run_device_once(&server, first).await,
+        CycleOutcome::UpdatedSuccessfully
+    );
+    tick(&server).await;
+    assert_eq!(
+        group_statuses(&server, rollout_id).await,
+        vec![
+            RolloutGroupStatus::Finished.code(),
+            RolloutGroupStatus::Running.code()
+        ]
+    );
+}
+
+/// In a download-only rollout DOWNLOADED is the end of the job, and the
+/// rollout moves on with it.
+#[tokio::test]
+#[ignore]
+async fn a_download_only_rollout_advances_on_downloaded() {
+    let server = common::spawn().await;
+    let api = Api::new(&server.base_url);
+    let mut targets = Vec::new();
+    for n in 0..2 {
+        targets.push(common::seed_target(&server, "DEFAULT", &format!("dlonly-{n}")).await);
+    }
+    let ds = common::seed_ds_with_artifact(&server, "DEFAULT", "dlonly-fw", b"dlonly").await;
+    let rollout_id = create_typed_rollout(&api, "dlonly", ds.ds_id, "downloadonly").await;
+    tick(&server).await;
+    api.post(&format!("/rest/v1/rollouts/{rollout_id}/start"), &json!({}))
+        .await;
+    tick(&server).await;
+
+    let groups = members_per_group(&server, rollout_id).await;
+    let first = targets
+        .iter()
+        .find(|t| t.controller_id == groups[0][0])
+        .unwrap();
+    run_device_once(&server, first).await;
+    assert_eq!(
+        action_status(&server, rollout_id, &first.controller_id).await,
+        ActionStatus::Downloaded.code()
+    );
+
+    tick(&server).await;
+    assert_eq!(
+        group_statuses(&server, rollout_id).await,
+        vec![
+            RolloutGroupStatus::Finished.code(),
+            RolloutGroupStatus::Running.code()
+        ]
     );
 }
 

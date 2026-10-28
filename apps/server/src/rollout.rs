@@ -1093,8 +1093,10 @@ async fn running_group_stats(
     rollout_id: i64,
 ) -> AppResult<Vec<hawier_api::ext::GroupStats>> {
     let groups = sqlx::query(
-        "SELECT id, name, total_targets, success_condition_exp, error_condition_exp
-         FROM sp_rollout_group WHERE rollout = $1 AND status = $2 ORDER BY id",
+        "SELECT g.id, g.name, g.total_targets, g.success_condition_exp,
+                g.error_condition_exp, r.action_type
+         FROM sp_rollout_group g JOIN sp_rollout r ON r.id = g.rollout
+         WHERE g.rollout = $1 AND g.status = $2 ORDER BY g.id",
     )
     .bind(rollout_id)
     .bind(RolloutGroupStatus::Running.code())
@@ -1110,12 +1112,18 @@ async fn running_group_stats(
         .bind(group_id)
         .fetch_all(&state.pool)
         .await?;
+        // DOWNLOADED is a success only where it is the end of the job. In
+        // any other rollout the device has the bytes and has not installed
+        // them, and counting it started the next group before anyone had
+        // updated — hawkBit counts it for DOWNLOAD_ONLY alone.
+        let download_only = group.get::<i32, _>("action_type") == ActionType::DownloadOnly.code();
         let mut finished = 0i64;
         let mut errors = 0i64;
         for c in &counts {
             let count: i64 = c.get("c");
             match ActionStatus::try_from(c.get::<i32, _>("status")) {
-                Ok(ActionStatus::Finished) | Ok(ActionStatus::Downloaded) => finished += count,
+                Ok(ActionStatus::Finished) => finished += count,
+                Ok(ActionStatus::Downloaded) if download_only => finished += count,
                 Ok(ActionStatus::Error) => errors += count,
                 _ => {}
             }

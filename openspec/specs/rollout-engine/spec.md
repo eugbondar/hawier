@@ -75,7 +75,7 @@ Activating a group SHALL make each of its scheduled actions active, as RUNNING o
 - **THEN** the older action is CANCELING (or CANCELED with autoclose) and the rollout's action is RUNNING
 
 ### Requirement: Evaluation and advance
-For RUNNING rollouts the engine SHALL take per-group counts of every RUNNING group and ask the strategy for a verdict. Only the engine SHALL apply the verdict, as follows:
+For RUNNING rollouts the engine SHALL take per-group counts of every RUNNING group and ask the strategy for a verdict. The finished count of a group SHALL be its FINISHED actions, plus its DOWNLOADED actions only when the rollout is download-only: for any other action type DOWNLOADED means the device has not installed yet, and SHALL NOT count towards the success threshold. Only the engine SHALL apply the verdict, as follows:
 - groups judged errored become ERROR
 - a pause reason pauses the rollout and emits `rollout.paused`
 - a group judged to have met its success condition SHALL start the group that follows it in id order, when that group is still SCHEDULED. The group itself SHALL stay RUNNING. When it is the last group of a dynamic rollout, the engine SHALL grow the rollout as for dynamic rollouts.
@@ -107,6 +107,14 @@ With no group running, the engine SHALL activate the next SCHEDULED group in id 
 #### Scenario: Completion
 - **WHEN** all groups finish
 - **THEN** the rollout is FINISHED with `totalTargetsPerStatus.finished` equal to the total
+
+#### Scenario: Downloaded is not installed
+- **WHEN** a soft rollout's group 1 has a 100% success threshold and its only device reports `downloaded` and defers installation
+- **THEN** group 1 stays RUNNING and group 2 stays SCHEDULED; once the device installs, group 1 becomes FINISHED and group 2 RUNNING
+
+#### Scenario: Download-only advances on downloaded
+- **WHEN** a download-only rollout's group 1 has a 100% success threshold and its only device reports `downloaded`
+- **THEN** group 1 becomes FINISHED and group 2 RUNNING
 
 ### Requirement: Operator controls
 - `POST .../pause` (RUNNING only) SHALL pause the rollout and emit `rollout.paused` with reason `paused by <user>`.
